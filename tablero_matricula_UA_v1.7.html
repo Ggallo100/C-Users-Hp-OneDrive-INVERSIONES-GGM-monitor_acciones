@@ -802,7 +802,7 @@ tfoot td.num{text-align:right}
 
 /* Versión de la aplicación: se muestra en la barra de estado para poder
    confirmar qué copia del archivo se está ejecutando. */
-const VERSION = '1.6';
+const VERSION = '1.7';
 
 const $ = (s, r) => (r || document).querySelector(s);
 const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
@@ -2734,10 +2734,20 @@ async function leerXLSX(buffer) {
 
   const hoja = dec.decode(archivos[nombreHoja]);
   const filas = [];
-  for (const mf of hoja.matchAll(/<row[^>]*>([\s\S]*?)<\/row>/g)) {
+  /* Una celda vacía con formato la escribe Excel autocerrada: <c r="N5" s="1"/>.
+     El patrón anterior probaba primero la forma con cierre, así que <c ... /> le
+     encajaba en la parte de apertura y el cuerpo se estiraba hasta el </c> de la
+     celda SIGUIENTE: la celda vacía se quedaba con el valor de su vecina y esa
+     vecina desaparecía. Con «Nuevos» vacío para los continuadores, cada uno de
+     ellos recibía la edad de la columna contigua y los nuevos acababan siendo la
+     suma de las edades. La alternativa autocerrada tiene que probarse antes de
+     abrir cuerpo, y lo mismo para las filas vacías. */
+  const RE_FILA = /<row\b([^>]*?)(?:\/>|>([\s\S]*?)<\/row>)/g;
+  const RE_CELDA = /<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g;
+  for (const mf of hoja.matchAll(RE_FILA)) {
     const celdas = [];
-    for (const mc of mf[1].matchAll(/<c([^>]*)>([\s\S]*?)<\/c>|<c([^>]*)\/>/g)) {
-      const attr = mc[1] || mc[3] || '';
+    for (const mc of (mf[2] || '').matchAll(RE_CELDA)) {
+      const attr = mc[1] || '';
       const cuerpo = mc[2] || '';
       const ref = /r="([A-Z]+)\d+"/.exec(attr);
       const col = ref ? letrasACol(ref[1]) : celdas.length;
@@ -2748,7 +2758,12 @@ async function leerXLSX(buffer) {
       } else {
         const v = /<v>([\s\S]*?)<\/v>/.exec(cuerpo);
         valor = v ? desescapaXml(v[1]) : '';
-        if (tipo && tipo[1] === 's') valor = compartidas[+valor] || '';
+        /* Una cadena compartida puede ser legítimamente «0» o vacía: se
+           comprueba que el índice exista en lugar de usar `|| ''`. */
+        if (tipo && tipo[1] === 's') {
+          const c = compartidas[+valor];
+          valor = c === undefined ? '' : c;
+        }
       }
       celdas[col] = valor;
     }
