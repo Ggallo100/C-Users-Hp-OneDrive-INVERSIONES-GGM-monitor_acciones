@@ -452,20 +452,27 @@ tfoot td.num{text-align:right}
 
         <div class="tarjeta g6" data-ch="chCarrera">
           <div class="cab">
-            <div><h3>Carreras con mayor matrícula</h3><div class="nota">Top 12 · nuevos y continuadores</div></div>
+            <div><h3>Carreras con mayor matrícula</h3>
+              <div class="nota">Nuevos y continuadores apilados</div></div>
             <div class="herr"><button data-vista>Tabla</button><button data-png>PNG</button></div>
           </div>
-          <div class="lienzo-ch" style="min-height:370px"><canvas id="chCarrera"></canvas></div>
+          <div class="ctrl"><select id="carreraTop">
+            <option value="12" selected>Top 12</option>
+            <option value="15">Top 15</option>
+            <option value="0">Todas las carreras</option>
+          </select></div>
+          <div class="lienzo-ch" style="min-height:330px"><canvas id="chCarrera"></canvas></div>
           <div class="vista-tabla"></div>
         </div>
 
         <div class="tarjeta g6" data-ch="chCurva">
           <div class="cab">
-            <div><h3>Curva de captación</h3>
-              <div class="nota">Matrículas registradas por mes de matrícula</div></div>
+            <div><h3>Curva acumulada de matrícula</h3>
+              <div class="nota" id="notaCurva">Acumulado por mes de matrícula</div></div>
             <div class="herr"><button data-vista>Tabla</button><button data-png>PNG</button></div>
           </div>
-          <div class="lienzo-ch" style="min-height:370px"><canvas id="chCurva"></canvas></div>
+          <div class="ctrl"><select id="curvaMed"><option value="M">Todos los matriculados</option><option value="N">Nuevos</option><option value="C">Continuadores</option></select></div>
+          <div class="lienzo-ch" style="min-height:330px"><canvas id="chCurva"></canvas></div>
           <div class="vista-tabla"></div>
         </div>
       </div>
@@ -477,7 +484,7 @@ tfoot td.num{text-align:right}
       <div class="rejilla">
         <div class="tarjeta g4" data-ch="chGenero">
           <div class="cab">
-            <div><h3>Género</h3><div class="nota">Distribución de matriculados</div></div>
+            <div><h3>Género</h3><div class="nota">Nuevos y continuadores apilados</div></div>
             <div class="herr"><button data-vista>Tabla</button><button data-png>PNG</button></div>
           </div>
           <div class="lienzo-ch"><canvas id="chGenero"></canvas></div>
@@ -489,13 +496,15 @@ tfoot td.num{text-align:right}
             <div><h3>Generación por período</h3><div class="nota">Composición de la matrícula en el tiempo</div></div>
             <div class="herr"><button data-vista>Tabla</button><button data-png>PNG</button></div>
           </div>
+          <div class="ctrl"><select id="genPerMed"><option value="M">Todos los matriculados</option><option value="N">Nuevos</option><option value="C">Continuadores</option></select></div>
           <div class="lienzo-ch"><canvas id="chGenPer"></canvas></div>
           <div class="vista-tabla"></div>
         </div>
 
         <div class="tarjeta g6" data-ch="chEdad">
           <div class="cab">
-            <div><h3>Edad promedio por período</h3><div class="nota">Ponderada por matriculados con edad válida</div></div>
+            <div><h3>Edad promedio por período</h3>
+              <div class="nota" id="notaEdad">Ponderada por matriculados con edad válida</div></div>
             <div class="herr"><button data-vista>Tabla</button><button data-png>PNG</button></div>
           </div>
           <div class="lienzo-ch"><canvas id="chEdad"></canvas></div>
@@ -513,7 +522,8 @@ tfoot td.num{text-align:right}
 
         <div class="tarjeta g4" data-ch="chColegio">
           <div class="cab">
-            <div><h3>Colegio de procedencia</h3><div class="nota">Tipo de institución educativa</div></div>
+            <div><h3>Colegio de procedencia</h3>
+              <div class="nota">Tipo de institución · nuevos y continuadores apilados</div></div>
             <div class="herr"><button data-vista>Tabla</button><button data-png>PNG</button></div>
           </div>
           <div class="lienzo-ch"><canvas id="chColegio"></canvas></div>
@@ -531,7 +541,8 @@ tfoot td.num{text-align:right}
 
         <div class="tarjeta g4" data-ch="chEscala">
           <div class="cab">
-            <div><h3>Escalas de pensión</h3><div class="nota">Top 10 por matriculados</div></div>
+            <div><h3>Escalas de pensión</h3>
+              <div class="nota">Top 10 · nuevos y continuadores apilados</div></div>
             <div class="herr"><button data-vista>Tabla</button><button data-png>PNG</button></div>
           </div>
           <div class="lienzo-ch" style="min-height:300px"><canvas id="chEscala"></canvas></div>
@@ -546,7 +557,8 @@ tfoot td.num{text-align:right}
       <div class="rejilla">
         <div class="tarjeta g5" data-ch="chDepto">
           <div class="cab">
-            <div><h3>Departamento de residencia</h3><div class="nota">Top 12 · excluye no registrados</div></div>
+            <div><h3>Departamento de residencia</h3>
+              <div class="nota">Top 12 · nuevos y continuadores apilados · excluye no registrados</div></div>
             <div class="herr"><button data-vista>Tabla</button><button data-png>PNG</button></div>
           </div>
           <div class="lienzo-ch" style="min-height:400px"><canvas id="chDepto"></canvas></div>
@@ -555,7 +567,8 @@ tfoot td.num{text-align:right}
 
         <div class="tarjeta g7" data-ch="chDistrito">
           <div class="cab">
-            <div><h3>Distritos de residencia</h3><div class="nota">Top 15 · excluye no registrados</div></div>
+            <div><h3>Distritos de residencia</h3>
+              <div class="nota">Top 15 · nuevos y continuadores apilados · excluye no registrados</div></div>
             <div class="herr"><button data-vista>Tabla</button><button data-png>PNG</button></div>
           </div>
           <div class="lienzo-ch" style="min-height:400px"><canvas id="chDistrito"></canvas></div>
@@ -802,7 +815,7 @@ tfoot td.num{text-align:right}
 
 /* Versión de la aplicación: se muestra en la barra de estado para poder
    confirmar qué copia del archivo se está ejecutando. */
-const VERSION = '1.7';
+const VERSION = '1.8';
 
 const $ = (s, r) => (r || document).querySelector(s);
 const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
@@ -1171,6 +1184,38 @@ function agrupar(clave, masc) {
     acumular(o, i);
   }
   return m;
+}
+
+/** Agrupa por una dimensión separando las filas de solo nuevos de las de solo
+    continuadores, para poder comparar medidas que no se pueden repartir por
+    diferencia —la edad promedio, sobre todo—.
+
+    El modelo guarda la edad sumada por fila sin distinguir la condición de cada
+    estudiante, así que solo las filas homogéneas (N = M o N = 0) permiten
+    atribuirla. Las mixtas quedan fuera del cálculo por condición y se
+    contabiliza qué proporción de la matrícula sí queda cubierta, para poder
+    declararlo en pantalla en lugar de dar una cifra sin matices. */
+function agruparCondicion(clave) {
+  const col = Base.cols[clave], m = new Map();
+  for (let i = 0; i < Base.n; i++) {
+    if (!mascara[i]) continue;
+    const c = col[i];
+    let o = m.get(c);
+    if (!o) { o = { T: cero(), N: cero(), C: cero(), cubiertos: 0, total: 0 }; m.set(c, o); }
+    acumular(o.T, i);
+    const M = Base.meas.M[i], nu = Base.meas.N[i];
+    o.total += M;
+    if (nu === M) { acumular(o.N, i); o.cubiertos += M; }
+    else if (nu === 0) { acumular(o.C, i); o.cubiertos += M; }
+  }
+  return m;
+}
+
+/** Cobertura del corte por condición sobre un mapa de agruparCondicion(). */
+function coberturaCondicion(mapa) {
+  let cub = 0, tot = 0;
+  for (const o of mapa.values()) { cub += o.cubiertos; tot += o.total; }
+  return { cubiertos: cub, total: tot, pct: tot ? 100 * cub / tot : 100 };
 }
 
 /** Agrupa por dos dimensiones: Map("c1|c2" -> acumulador). */
@@ -1684,10 +1729,11 @@ function barrasHorizontales(id, items, cual, opciones) {
 /* ---- Barras apiladas horizontales: nuevos + continuadores ---- */
 function barrasApiladas(id, items, opciones) {
   const o = opciones || {};
+  const rot = x => (o.rotulo ? o.rotulo(x.valor) : x.valor);
   hacerGrafico(id, {
     type: 'bar',
     data: {
-      labels: items.map(x => x.valor),
+      labels: items.map(rot),
       datasets: [
         {
           label: 'Continuadores', data: items.map(x => medida(x.acc, 'C')),
@@ -1705,8 +1751,16 @@ function barrasApiladas(id, items, opciones) {
       indexAxis: 'y',
       layout: { padding: { right: 52 } },
       plugins: {
-        etiquetasFin: { activo: true, color: tok('tinta2'), formato: 'N' },
-        tooltip: { callbacks: { footer: it => 'Total: ' + fmtN(it.reduce((s, x) => s + x.parsed.x, 0)) } }
+        etiquetasFin: { activo: true, color: tok('tinta2'), formato: 'N', total: o.total || 0 },
+        tooltip: {
+          callbacks: {
+            footer: it => {
+              const tot = it.reduce((s, x) => s + x.parsed.x, 0);
+              const acc = items[it[0].dataIndex].acc;
+              return 'Total: ' + fmtN(tot) + '  ·  % Nuevos: ' + fmtP(medida(acc, 'PN'));
+            }
+          }
+        }
       },
       scales: {
         x: { stacked: true, beginAtZero: true, ticks: { callback: v => fmtN(v) } },
@@ -1714,10 +1768,11 @@ function barrasApiladas(id, items, opciones) {
       }
     })
   });
-  registrarTabla(id, [o.tituloDim || 'Categoría', 'Matriculados', 'Nuevos', 'Continuadores', '% Nuevos', 'Edad prom.'],
+  registrarTabla(id, [o.tituloDim || 'Categoría', 'Matriculados', 'Nuevos', 'Continuadores', '% Nuevos', 'Edad prom.', '% Deserción'],
     items.map(x => [
-      x.valor, fmtN(medida(x.acc, 'M')), fmtN(medida(x.acc, 'N')),
-      fmtN(medida(x.acc, 'C')), fmtP(medida(x.acc, 'PN')), fmtD(medida(x.acc, 'E'))
+      rot(x), fmtN(medida(x.acc, 'M')), fmtN(medida(x.acc, 'N')),
+      fmtN(medida(x.acc, 'C')), fmtP(medida(x.acc, 'PN')),
+      x.acc.ME ? fmtD(medida(x.acc, 'E')) : '—', fmtP(medida(x.acc, 'PD'))
     ]));
 }
 
@@ -1886,35 +1941,77 @@ function pintarResumen() {
     fmtD(medida(x.acc, 'E')), fmtP(medida(x.acc, 'PD'))]));
 
   /* Carreras */
-  barrasApiladas('chCarrera', topN(agrupar('Carrera'), 'Carrera', 'M', 12, {}), { tituloDim: 'Carrera' });
+  pintarCarreras();
 
-  /* Curva de captación por mes de matrícula */
+  /* Curva acumulada por mes de matrícula */
+  pintarCurva();
+}
+
+/** Carreras con mayor matrícula, con el corte elegido por el usuario. */
+function pintarCarreras() {
+  const tope = +($('#carreraTop') || {}).value || 0;
+  const items = topN(agrupar('Carrera'), 'Carrera', 'M', tope, {});
+  /* Con «todas» pueden ser 25 carreras: el lienzo crece con ellas para que las
+     barras no queden aplastadas contra sus etiquetas. */
+  const lienzo = $('[data-ch="chCarrera"] .lienzo-ch');
+  if (lienzo) lienzo.style.minHeight = Math.max(330, 60 + items.length * 22) + 'px';
+  barrasApiladas('chCarrera', items, { tituloDim: 'Carrera' });
+}
+
+/** Curva acumulada de matrícula por mes, sobre la medida elegida.
+    Acumular tiene sentido para responder «a estas alturas del período, cuántos
+    llevamos», que es la pregunta de captación; el valor mensual suelto sigue
+    disponible en la vista de tabla. */
+function pintarCurva() {
+  const cual = (($('#curvaMed') || {}).value) || 'M';
+  const med = MEDIDAS[cual];
   const mesMapa = agrupar('MesMatricula');
   const meses = Array.from(mesMapa.keys())
     .filter(c => Base.dims.MesMatricula[c] !== NO_REG)
-    .sort((a, b) => Base.dims.MesMatricula[a] < Base.dims.MesMatricula[b] ? -1 : 1);
+    .sort((a, b) => Base.dims.MesMatricula[a] < Base.dims.MesMatricula[b] ? -1
+      : Base.dims.MesMatricula[a] > Base.dims.MesMatricula[b] ? 1 : 0);
+  let suma = 0;
+  const acumulado = meses.map(c => (suma += medida(mesMapa.get(c), cual)));
+  const nota = $('#notaCurva');
+  if (nota) nota.textContent = 'Acumulado de ' + med.lbl.toLowerCase() + ' por mes de matrícula';
+
   hacerGrafico('chCurva', {
     type: 'line',
     data: {
       labels: meses.map(c => Base.dims.MesMatricula[c]),
       datasets: [{
-        label: 'Matrículas registradas',
-        data: meses.map(c => mesMapa.get(c).M),
+        label: 'Acumulado · ' + med.lbl,
+        data: acumulado,
         borderColor: tok('s1'), backgroundColor: 'transparent',
         borderWidth: 2, tension: .25, pointRadius: 0, pointHoverRadius: 5,
         pointBackgroundColor: tok('s1'), pointBorderColor: tok('sup'), pointBorderWidth: 2
       }]
     },
     options: opcionesBase({
-      plugins: { legend: { display: false } },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: c => 'Acumulado: ' + fmtN(c.parsed.y),
+            footer: it => 'En el mes: ' + fmtN(medida(mesMapa.get(meses[it[0].dataIndex]), cual))
+          }
+        }
+      },
       scales: {
         x: { grid: { display: false }, ticks: { maxRotation: 60, minRotation: 45, autoSkip: true, maxTicksLimit: 14 } },
-        y: { beginAtZero: true, ticks: { callback: v => fmtN(v) } }
+        y: {
+          beginAtZero: true, ticks: { callback: v => fmtN(v) },
+          title: { display: true, text: med.lbl + ' acumulados', color: tok('tinta3') }
+        }
       }
     })
   });
-  registrarTabla('chCurva', ['Mes de matrícula', 'Matrículas', 'Nuevos'],
-    meses.map(c => [Base.dims.MesMatricula[c], fmtN(mesMapa.get(c).M), fmtN(mesMapa.get(c).N)]));
+  registrarTabla('chCurva',
+    ['Mes de matrícula', 'Matriculados', 'Nuevos', 'Continuadores', 'Acumulado · ' + med.lbl],
+    meses.map((c, i) => {
+      const o = mesMapa.get(c);
+      return [Base.dims.MesMatricula[c], fmtN(o.M), fmtN(o.N), fmtN(medida(o, 'C')), fmtN(acumulado[i])];
+    }));
 }
 
 function pintarExplorador() {
@@ -1934,78 +2031,88 @@ function pintarExplorador() {
    ========================================================================== */
 
 function pintarDemografia() {
-  /* Género */
-  const genMapa = agrupar('Genero');
-  const genItems = topN(genMapa, 'Genero', 'M', 0, {});
+  /* Género: apilado nuevos + continuadores */
+  const genItems = topN(agrupar('Genero'), 'Genero', 'M', 0, {});
   const totG = genItems.reduce((s, x) => s + x.acc.M, 0);
-  hacerGrafico('chGenero', {
-    type: 'bar',
-    data: {
-      labels: genItems.map(x => x.valor),
-      datasets: [{
-        label: 'Matriculados', data: genItems.map(x => x.acc.M),
-        backgroundColor: genItems.map(x => colorEntidad(x.c)),
-        borderRadius: 4, borderSkipped: 'start', maxBarThickness: 26
-      }]
-    },
-    options: opcionesBase({
-      indexAxis: 'y',
-      layout: { padding: { right: 76 } },
-      plugins: {
-        legend: { display: false },
-        etiquetasFin: { activo: true, color: tok('tinta2'), formato: 'N', total: totG }
-      },
-      scales: { x: { beginAtZero: true, ticks: { callback: v => fmtN(v) } }, y: { grid: { display: false } } }
-    })
-  });
-  registrarTabla('chGenero', ['Género', 'Matriculados', 'Participación', 'Edad prom.', '% Deserción'],
-    genItems.map(x => [x.valor, fmtN(x.acc.M), fmtP(totG ? 100 * x.acc.M / totG : 0),
-    fmtD(medida(x.acc, 'E')), fmtP(medida(x.acc, 'PD'))]));
+  barrasApiladas('chGenero', genItems, { tituloDim: 'Género', total: totG });
 
-  /* Generación por período */
+  /* Generación por período: la medida la elige el usuario, de modo que la
+     composición generacional puede leerse solo entre los nuevos o solo entre
+     los continuadores. */
   const perMapa = agrupar('Periodo_real');
   const per = periodosOrdenados(perMapa);
   const lbl = per.map(c => rotuloPeriodo(Base.dims.Periodo_real[c]));
+  const cualGP = (($('#genPerMed') || {}).value) || 'M';
+  const medGP = MEDIDAS[cualGP];
   const cruce = agrupar2('Periodo_real', 'Generacion');
   const gens = Array.from(agrupar('Generacion').keys()).sort((a, b) => a - b);
+  const valGP = (p, g) => medida(cruce.get(p + '|' + g) || cero(), cualGP);
   hacerGrafico('chGenPer', {
     type: 'bar',
     data: {
       labels: lbl,
       datasets: gens.map(g => ({
         label: Base.dims.Generacion[g], stack: 'a',
-        data: per.map(p => (cruce.get(p + '|' + g) || cero()).M),
+        data: per.map(p => valGP(p, g)),
         backgroundColor: colorEntidad(g), borderWidth: 2, borderColor: tok('sup'),
         borderRadius: 2, maxBarThickness: 54
       }))
     },
     options: opcionesBase({
+      plugins: {
+        tooltip: { callbacks: { footer: it => 'Total ' + medGP.lbl.toLowerCase() + ': ' +
+          fmtN(it.reduce((t, x) => t + x.parsed.y, 0)) } }
+      },
       scales: {
         x: { stacked: true, grid: { display: false } },
-        y: { stacked: true, beginAtZero: true, ticks: { callback: v => fmtN(v) } }
+        y: {
+          stacked: true, beginAtZero: true, ticks: { callback: v => fmtN(v) },
+          title: { display: true, text: medGP.lbl, color: tok('tinta3') }
+        }
       }
     })
   });
-  registrarTabla('chGenPer', ['Período'].concat(gens.map(g => Base.dims.Generacion[g])),
-    per.map((p, i) => [lbl[i]].concat(gens.map(g => fmtN((cruce.get(p + '|' + g) || cero()).M)))));
+  registrarTabla('chGenPer', ['Período · ' + medGP.lbl].concat(gens.map(g => Base.dims.Generacion[g])),
+    per.map((p, i) => [lbl[i]].concat(gens.map(g => fmtN(valGP(p, g))))));
 
-  /* Edad promedio por período (serie única, sin eje secundario) */
+  /* Edad promedio por período, separando nuevos y continuadores.
+     A diferencia de los conteos, la edad no se puede repartir por diferencia:
+     el modelo suma las edades por fila sin distinguir la condición de cada
+     estudiante. Las series de nuevos y continuadores se calculan solo con las
+     filas homogéneas y la nota declara qué parte de la matrícula cubren, para
+     que nadie lea una cobertura parcial como si fuera el total. */
+  const edadMapa = agruparCondicion('Periodo_real');
+  const cob = coberturaCondicion(edadMapa);
+  const serieEdad = (campo, color, guiones) => ({
+    label: campo === 'T' ? 'Todos' : campo === 'N' ? 'Nuevos' : 'Continuadores',
+    data: per.map(c => {
+      const o = edadMapa.get(c);
+      const a = o && o[campo];
+      return a && a.ME ? +medida(a, 'E').toFixed(2) : null;
+    }),
+    borderColor: color, backgroundColor: 'transparent', borderWidth: 2, tension: .3,
+    borderDash: guiones || [], spanGaps: true,
+    pointRadius: 4, pointHoverRadius: 7, pointBackgroundColor: color,
+    pointBorderColor: tok('sup'), pointBorderWidth: 2
+  });
+  const notaEdad = $('#notaEdad');
+  if (notaEdad) {
+    notaEdad.textContent = 'Ponderada por matriculados con edad válida · el corte por condición ' +
+      'usa las filas homogéneas (' + fmtP(cob.pct) + ' de la matrícula filtrada)';
+  }
   hacerGrafico('chEdad', {
     type: 'line',
     data: {
       labels: lbl,
-      datasets: [{
-        label: 'Edad promedio',
-        data: per.map(c => +medida(perMapa.get(c), 'E').toFixed(2)),
-        borderColor: tok('s2'), backgroundColor: 'transparent', borderWidth: 2, tension: .3,
-        pointRadius: 4, pointHoverRadius: 7, pointBackgroundColor: tok('s2'),
-        pointBorderColor: tok('sup'), pointBorderWidth: 2
-      }]
+      datasets: [
+        serieEdad('T', tok('s2')),
+        serieEdad('N', tok('s3'), [5, 3]),
+        serieEdad('C', tok('s1'), [2, 2])
+      ]
     },
     options: opcionesBase({
       plugins: {
-        legend: { display: false },
-        tooltip: { callbacks: { label: c => 'Edad promedio: ' + fmtD(c.parsed.y) + ' años' } }
+        tooltip: { callbacks: { label: c => c.dataset.label + ': ' + fmtD(c.parsed.y) + ' años' } }
       },
       scales: {
         x: { grid: { display: false } },
@@ -2013,8 +2120,14 @@ function pintarDemografia() {
       }
     })
   });
-  registrarTabla('chEdad', ['Período', 'Edad promedio', 'Con edad válida', 'Matriculados'],
-    per.map((c, i) => [lbl[i], fmtD(medida(perMapa.get(c), 'E')), fmtN(perMapa.get(c).ME), fmtN(perMapa.get(c).M)]));
+  const edadDe = (o, campo) => (o && o[campo] && o[campo].ME) ? fmtD(medida(o[campo], 'E')) : '—';
+  registrarTabla('chEdad',
+    ['Período', 'Edad · todos', 'Edad · nuevos', 'Edad · continuadores', 'Con edad válida', 'Matriculados'],
+    per.map((c, i) => {
+      const o = edadMapa.get(c);
+      return [lbl[i], edadDe(o, 'T'), edadDe(o, 'N'), edadDe(o, 'C'),
+        fmtN(o ? o.T.ME : 0), fmtN(o ? o.T.M : 0)];
+    }));
 
   /* Ciclo */
   const cicloMapa = agrupar('Ciclo');
@@ -2043,7 +2156,7 @@ function pintarDemografia() {
     }));
 
   /* Tipo de colegio, modalidad y escalas */
-  barrasHorizontales('chColegio', topN(agrupar('TipoColegio'), 'TipoColegio', 'M', 8, {}), 'M',
+  barrasApiladas('chColegio', topN(agrupar('TipoColegio'), 'TipoColegio', 'M', 8, {}),
     { tituloDim: 'Tipo de colegio' });
 
   const modMapa = agrupar('Modalidad_estudios');
@@ -2064,7 +2177,7 @@ function pintarDemografia() {
   registrarTabla('chModalidad', ['Modalidad', 'Matriculados', 'Nuevos', '% Nuevos', 'Edad prom.'],
     modItems.map(x => [x.valor, fmtN(x.acc.M), fmtN(x.acc.N), fmtP(medida(x.acc, 'PN')), fmtD(medida(x.acc, 'E'))]));
 
-  barrasHorizontales('chEscala', topN(agrupar('Escala'), 'Escala', 'M', 10, { plegar: true }), 'M',
+  barrasApiladas('chEscala', topN(agrupar('Escala'), 'Escala', 'M', 10, { plegar: true }),
     { tituloDim: 'Escala' });
 }
 
@@ -2073,11 +2186,11 @@ function pintarDemografia() {
    ========================================================================== */
 
 function pintarTerritorio() {
-  barrasHorizontales('chDepto', topN(agrupar('DepartamentoResidencia'), 'DepartamentoResidencia', 'M', 12,
-    { excluirNoReg: true, plegar: true }), 'M', { tituloDim: 'Departamento' });
+  barrasApiladas('chDepto', topN(agrupar('DepartamentoResidencia'), 'DepartamentoResidencia', 'M', 12,
+    { excluirNoReg: true, plegar: true }), { tituloDim: 'Departamento' });
 
   const distMapa = agrupar('DistritoResidencia');
-  barrasHorizontales('chDistrito', topN(distMapa, 'DistritoResidencia', 'M', 15, { excluirNoReg: true }), 'M',
+  barrasApiladas('chDistrito', topN(distMapa, 'DistritoResidencia', 'M', 15, { excluirNoReg: true }),
     { tituloDim: 'Distrito' });
 
   /* Sede por período */
@@ -3392,6 +3505,9 @@ function conectarEventos() {
     refrescar();
   };
 
+  $('#curvaMed').onchange = pintarCurva;
+  $('#carreraTop').onchange = pintarCarreras;
+  $('#genPerMed').onchange = pintarDemografia;
   $('#expDim').onchange = pintarExplorador;
   $('#expMed').onchange = pintarExplorador;
   $('#expTop').onchange = pintarExplorador;
