@@ -784,7 +784,7 @@ tfoot td.num{text-align:right}
 
 /* Versión de la aplicación: se muestra en la barra de estado para poder
    confirmar qué copia del archivo se está ejecutando. */
-const VERSION = '1.4';
+const VERSION = '1.5';
 
 const $ = (s, r) => (r || document).querySelector(s);
 const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
@@ -895,7 +895,30 @@ const Base = {
     for (const k of ['M', 'N', 'SE', 'ME']) this.meas[k] = desdeHex(raw.meas[k]);
     this.n = this.meas.M.length;
     this.bitacora = raw.bitacora || [];
+    this.sanear();
     this.recalcularAuxiliares();
+  },
+
+  /** Impone las invariantes del modelo: los nuevos son un subconjunto de los
+      matriculados (continuadores = M − N, que nunca puede ser negativo) y las
+      edades válidas tampoco pueden superar al total de matriculados. Se aplica
+      al cargar y al reemplazar, así que una base ya dañada por una importación
+      anterior queda reparada al abrirla en lugar de arrastrar el error.
+      Devuelve cuántas filas hubo que corregir. */
+  sanear() {
+    const M = this.meas.M, N = this.meas.N, ME = this.meas.ME, SE = this.meas.SE;
+    let tocadas = 0;
+    for (let i = 0; i < M.length; i++) {
+      let mal = false;
+      if (M[i] < 0) { M[i] = 0; mal = true; }
+      if (N[i] < 0 || N[i] > M[i]) { N[i] = Math.min(Math.max(N[i], 0), M[i]); mal = true; }
+      if (ME[i] < 0 || ME[i] > M[i]) { ME[i] = Math.min(Math.max(ME[i], 0), M[i]); mal = true; }
+      if (SE[i] < 0) { SE[i] = 0; mal = true; }
+      if (!ME[i] && SE[i]) { SE[i] = 0; mal = true; }
+      if (mal) tocadas++;
+    }
+    this.filasCorregidas = tocadas;
+    return tocadas;
   },
 
   /** Índices derivados que se usan en los bucles calientes. */
@@ -929,8 +952,11 @@ const Base = {
         if (c === undefined) { c = dims[k].length; dims[k].push(v); codigos[k].set(v, c); }
         cols[k].push(c);
       }
-      meas.M.push(+f.M || 0); meas.N.push(+f.N || 0);
-      meas.SE.push(+f.SE || 0); meas.ME.push(+f.ME || 0);
+      const fM = Math.max(0, Math.round(+f.M || 0));
+      meas.M.push(fM);
+      meas.N.push(Math.min(Math.max(0, Math.round(+f.N || 0)), fM));
+      meas.SE.push(Math.max(0, Math.round(+f.SE || 0)));
+      meas.ME.push(Math.min(Math.max(0, Math.round(+f.ME || 0)), fM));
     }
     // Reordena cada dimensión alfabéticamente dejando NO REGISTRADO al final.
     for (const k of this.claves) {
@@ -948,6 +974,7 @@ const Base = {
     for (const k of Object.keys(meas)) this.meas[k] = Int32Array.from(meas[k]);
     this.n = this.meas.M.length;
     if (meta) Object.assign(this.meta, meta);
+    this.sanear();
     this.recalcularAuxiliares();
   },
 
@@ -2465,7 +2492,9 @@ async function procesarImportacion() {
     Base.origenDatos = 'navegador';
     Base.anotar('Importación ' + modo + ' desde ' + arch.name + ' → ' + Base.n + ' registros agregados');
     est.innerHTML = 'Listo: la base quedó con <b>' + fmtN(Base.n) + '</b> registros.' +
-      (avisoImportacion ? '<div class="aviso" style="margin-top:8px">' + esc(avisoImportacion) + '</div>' : '');
+      (avisoImportacion ? '<div class="aviso" style="margin-top:8px">' + esc(avisoImportacion) + '</div>' : '') +
+      (Base.filasCorregidas ? '<div class="aviso" style="margin-top:8px">Se corrigieron <b>' +
+        fmtN(Base.filasCorregidas) + '</b> registros en los que los nuevos superaban a los matriculados.</div>' : '');
     $('#velImportar').classList.remove('abierto');
     trasCambioBase('Datos importados');
   } catch (e) {
@@ -2520,15 +2549,17 @@ function agregarDetalle(tabla) {
   };
 
   /* Los nuevos pueden llegar como conteo (archivo ya agregado) o como marca por
-     estudiante (SI/NO, 1/0, «Ingresante») en un detalle. Si no hay ninguna
-     columna reconocible se avisa: sin ella todos los alumnos entrarían como
-     continuadores y el corte nuevos/continuadores quedaría en blanco. */
-  const ALIAS_NUEVOS = ['Nuevos', 'Nuevo', 'Ingresantes', 'Ingresante', 'EsNuevo',
-    'AlumnoNuevo', 'Condicion', 'CondicionAlumno', 'TipoAlumno', 'TipoIngreso'];
+     estudiante (SI/NO, 1/0, «Ingresante») en un detalle. La lista se mantiene
+     corta y sin nombres genéricos a propósito: una columna como «Condicion» o
+     «TipoAlumno» existe en muchos padrones con un significado distinto y, si
+     lleva códigos numéricos, cada código se sumaría como si fuesen alumnos
+     nuevos. Antes bastaba eso para inflar los nuevos por encima de los
+     matriculados y dejar los continuadores en negativo. */
+  const ALIAS_NUEVOS = ['Nuevos', 'Nuevo', 'Ingresantes', 'Ingresante',
+    'EsNuevo', 'AlumnoNuevo', 'AlumnosNuevos'];
   const colNuevos = ALIAS_NUEVOS.find(c => idx[normalizaCol(c)] !== undefined);
-  avisoImportacion = colNuevos ? '' :
-    'El archivo no trae ninguna columna de nuevos (' + ALIAS_NUEVOS.slice(0, 4).join(', ') +
-    '…): todos los matriculados quedaron como continuadores.';
+  const cabNuevos = colNuevos === undefined ? '' : tabla.cabecera[idx[normalizaCol(colNuevos)]];
+  let nAcotados = 0, nIlegibles = 0;
 
   const nuevosDe = (f, M) => {
     if (!colNuevos) return 0;
@@ -2538,7 +2569,12 @@ function agregarDetalle(tabla) {
     if (/^(s[ií]|y|yes|true|verdadero|nuevo|nueva|ingresante)$/i.test(t)) return M;
     if (/^(no|n|false|falso|continuador|continuadora|antiguo)$/i.test(t)) return 0;
     const x = parseFloat(t.replace(',', '.'));
-    return isNaN(x) ? 0 : x;
+    if (isNaN(x)) { nIlegibles++; return 0; }
+    /* Una fila no puede aportar más nuevos que matriculados. Si la columna
+       elegida trae otra cosa (un código, una fecha, un importe) se nota aquí
+       y se avisa, en vez de propagar el disparate al tablero. */
+    if (x < 0 || x > M) { nAcotados++; return Math.min(Math.max(x, 0), M); }
+    return x;
   };
 
   const mapa = new Map();
@@ -2568,6 +2604,30 @@ function agregarDetalle(tabla) {
   const out = Array.from(mapa.values());
   out.forEach(o => { o.SE = Math.round(o.SE); });
   if (!out.length) throw new Error('No se pudo interpretar ninguna fila del archivo');
+
+  /* Resumen de lo que se interpretó. Se muestra siempre: saber de qué columna
+     salieron los nuevos es lo único que permite detectar a tiempo que el
+     archivo cambió de formato. */
+  const leidas = tabla.filas.length;
+  const avisos = [];
+  if (!colNuevos) {
+    avisos.push('El archivo no trae ninguna columna de nuevos (' +
+      ALIAS_NUEVOS.slice(0, 4).join(', ') + '…): todos los matriculados quedaron como continuadores.');
+  } else {
+    avisos.push('Nuevos leídos de la columna «' + cabNuevos + '».');
+    if (nAcotados) {
+      avisos.push('Atención: en ' + fmtN(nAcotados) + ' de ' + fmtN(leidas) + ' filas esa columna traía ' +
+        'un valor mayor que los matriculados de la fila y se recortó. Revisa que «' + cabNuevos +
+        '» sea de verdad la marca de ingresante y no otro dato.');
+    }
+    if (nIlegibles) {
+      avisos.push(fmtN(nIlegibles) + ' filas con un valor no numérico ni SI/NO en «' + cabNuevos +
+        '» se contaron como continuadores.');
+    }
+  }
+  const sinEdad = leidas - out.reduce((t, o) => t + o.ME, 0);
+  if (sinEdad > 0) avisos.push(fmtN(sinEdad) + ' matrículas sin edad válida (14 a 90 años) quedan fuera del promedio de edad.');
+  avisoImportacion = avisos.join(' ');
   return out;
 }
 
@@ -3410,6 +3470,13 @@ async function iniciar() {
   if (guardada && guardada.claves) {
     Base.cargar(guardada);
     Base.origenDatos = 'navegador';
+    /* Una base guardada por una versión anterior puede traer nuevos por encima
+       de matriculados. Se repara al cargarla, pero el usuario tiene que
+       enterarse: los totales no van a coincidir con los que vio ayer. */
+    if (Base.filasCorregidas) {
+      setTimeout(() => brindis('Se corrigieron ' + fmtN(Base.filasCorregidas) +
+        ' registros guardados con más nuevos que matriculados. Vuelve a importar el archivo para recuperar el dato real.', true), 900);
+    }
   } else {
     Base.cargar(window.BASE_INICIAL);
   }
