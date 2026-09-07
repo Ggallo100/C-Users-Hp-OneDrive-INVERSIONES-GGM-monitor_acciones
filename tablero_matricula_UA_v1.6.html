@@ -215,6 +215,22 @@ tfoot td{
 tfoot td.num{text-align:right}
 .barra-int{display:block;height:4px;border-radius:2px;background:var(--s1);margin-top:3px}
 
+/* ---------- Aviso permanente de datos no fiables ----------
+   Un brindis de tres segundos no sirve para advertir que los números que se
+   están mirando no son de fiar: el aviso se queda hasta que el usuario decide. */
+.alerta-datos{
+  background:var(--critico);color:#fff;padding:10px 16px;font-size:12px;line-height:1.5;
+  display:flex;align-items:center;gap:14px;flex-wrap:wrap;
+}
+.alerta-datos.oculto{display:none}
+.alerta-datos b{font-weight:700}
+.alerta-datos span{flex:1;min-width:280px}
+.alerta-datos button{
+  background:rgba(255,255,255,.18);border:1px solid rgba(255,255,255,.55);color:#fff;
+  border-radius:5px;padding:5px 11px;font-size:11px;font-weight:600;white-space:nowrap;
+}
+.alerta-datos button:hover{background:rgba(255,255,255,.3)}
+
 /* ---------- Barra de estado ---------- */
 .estado{
   position:sticky;bottom:0;background:var(--sup);border-top:1px solid var(--linea);
@@ -364,6 +380,8 @@ tfoot td.num{text-align:right}
   <button data-pg="detalle">Detalle y matriz</button>
   <button data-pg="mantenedor">Mantenedor de datos</button>
 </nav>
+
+<div class="alerta-datos oculto" id="alertaDatos"></div>
 
 <div class="marco">
   <aside id="panel">
@@ -784,7 +802,7 @@ tfoot td.num{text-align:right}
 
 /* Versión de la aplicación: se muestra en la barra de estado para poder
    confirmar qué copia del archivo se está ejecutando. */
-const VERSION = '1.5';
+const VERSION = '1.6';
 
 const $ = (s, r) => (r || document).querySelector(s);
 const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
@@ -901,23 +919,29 @@ const Base = {
 
   /** Impone las invariantes del modelo: los nuevos son un subconjunto de los
       matriculados (continuadores = M − N, que nunca puede ser negativo) y las
-      edades válidas tampoco pueden superar al total de matriculados. Se aplica
-      al cargar y al reemplazar, así que una base ya dañada por una importación
-      anterior queda reparada al abrirla en lugar de arrastrar el error.
-      Devuelve cuántas filas hubo que corregir. */
+      edades válidas tampoco pueden superar al total de matriculados.
+
+      Un N mayor que M significa que ese dato es basura, NO que todos los
+      alumnos de la fila sean nuevos. Recortarlo a M era inventar una respuesta
+      —y una que además invierte el reparto, porque deja la fila entera como
+      «nuevos»—, así que la condición se marca como perdida (N = 0) y se
+      contabiliza cuántas matrículas quedaron sin clasificar para poder
+      advertirlo en pantalla. Quien mira el tablero tiene que saber que ese
+      corte no es de fiar; ningún número inventado vale más que el aviso. */
   sanear() {
     const M = this.meas.M, N = this.meas.N, ME = this.meas.ME, SE = this.meas.SE;
-    let tocadas = 0;
+    let tocadas = 0, matriculas = 0;
     for (let i = 0; i < M.length; i++) {
       let mal = false;
       if (M[i] < 0) { M[i] = 0; mal = true; }
-      if (N[i] < 0 || N[i] > M[i]) { N[i] = Math.min(Math.max(N[i], 0), M[i]); mal = true; }
+      if (N[i] < 0 || N[i] > M[i]) { N[i] = 0; matriculas += M[i]; mal = true; }
       if (ME[i] < 0 || ME[i] > M[i]) { ME[i] = Math.min(Math.max(ME[i], 0), M[i]); mal = true; }
       if (SE[i] < 0) { SE[i] = 0; mal = true; }
       if (!ME[i] && SE[i]) { SE[i] = 0; mal = true; }
       if (mal) tocadas++;
     }
     this.filasCorregidas = tocadas;
+    this.matriculasSinClasificar = matriculas;
     return tocadas;
   },
 
@@ -2571,9 +2595,10 @@ function agregarDetalle(tabla) {
     const x = parseFloat(t.replace(',', '.'));
     if (isNaN(x)) { nIlegibles++; return 0; }
     /* Una fila no puede aportar más nuevos que matriculados. Si la columna
-       elegida trae otra cosa (un código, una fecha, un importe) se nota aquí
-       y se avisa, en vez de propagar el disparate al tablero. */
-    if (x < 0 || x > M) { nAcotados++; return Math.min(Math.max(x, 0), M); }
+       elegida trae otra cosa (un código, una fecha, un importe) el valor se
+       descarta y se avisa. Recortarlo a M sería peor que ignorarlo: dejaría la
+       fila entera como «nuevos» y el reparto saldría invertido. */
+    if (x < 0 || x > M) { nAcotados++; return 0; }
     return x;
   };
 
@@ -2616,9 +2641,10 @@ function agregarDetalle(tabla) {
   } else {
     avisos.push('Nuevos leídos de la columna «' + cabNuevos + '».');
     if (nAcotados) {
-      avisos.push('Atención: en ' + fmtN(nAcotados) + ' de ' + fmtN(leidas) + ' filas esa columna traía ' +
-        'un valor mayor que los matriculados de la fila y se recortó. Revisa que «' + cabNuevos +
-        '» sea de verdad la marca de ingresante y no otro dato.');
+      avisos.push('ATENCIÓN: en ' + fmtN(nAcotados) + ' de ' + fmtN(leidas) + ' filas la columna «' +
+        cabNuevos + '» traía un valor mayor que los matriculados de la fila. Esos valores se ignoraron ' +
+        '(cuentan como continuadores), así que el reparto entre nuevos y continuadores NO es fiable. ' +
+        'Casi seguro que «' + cabNuevos + '» no es la marca de ingresante: revisa el encabezado del archivo.');
     }
     if (nIlegibles) {
       avisos.push(fmtN(nIlegibles) + ' filas con un valor no numérico ni SI/NO en «' + cabNuevos +
@@ -3466,16 +3492,25 @@ async function iniciar() {
 
   configurarChart();
 
+  /* Una base guardada por una importación defectuosa trae el reparto entre
+     nuevos y continuadores corrompido. No se carga en silencio: se muestran los
+     datos incrustados —que se sabe que están bien— y se avisa, dejando que el
+     usuario decida si quiere ver igualmente lo guardado. Mostrar sin más una
+     cifra reparada a ojo es lo que hace que el error pase inadvertido. */
   const guardada = await Almacen.leer();
+  let dañada = null;
   if (guardada && guardada.claves) {
     Base.cargar(guardada);
-    Base.origenDatos = 'navegador';
-    /* Una base guardada por una versión anterior puede traer nuevos por encima
-       de matriculados. Se repara al cargarla, pero el usuario tiene que
-       enterarse: los totales no van a coincidir con los que vio ayer. */
     if (Base.filasCorregidas) {
-      setTimeout(() => brindis('Se corrigieron ' + fmtN(Base.filasCorregidas) +
-        ' registros guardados con más nuevos que matriculados. Vuelve a importar el archivo para recuperar el dato real.', true), 900);
+      dañada = {
+        filas: Base.filasCorregidas,
+        matriculas: Base.matriculasSinClasificar,
+        paquete: guardada
+      };
+      Base.cargar(window.BASE_INICIAL);
+      Base.origenDatos = 'archivo';
+    } else {
+      Base.origenDatos = 'navegador';
     }
   } else {
     Base.cargar(window.BASE_INICIAL);
@@ -3491,6 +3526,37 @@ async function iniciar() {
   construirSegmentadores();
   conectarEventos();
   refrescar();
+  if (dañada) avisarBaseDañada(dañada);
+}
+
+/** Aviso permanente cuando la base guardada en el navegador no es fiable. */
+function avisarBaseDañada(d) {
+  const el = $('#alertaDatos');
+  const cerrar = () => el.classList.add('oculto');
+  el.innerHTML =
+    '<span><b>La base guardada en este navegador no es fiable.</b> ' + fmtN(d.filas) +
+    ' registros (' + fmtN(d.matriculas) + ' matrículas) tenían más nuevos que matriculados, ' +
+    'así que el reparto entre nuevos y continuadores de esa importación se perdió y no puede ' +
+    'reconstruirse. Se están mostrando los datos incrustados en el archivo: vuelve a importar ' +
+    'tu Excel para actualizarlos.</span>' +
+    '<button id="alertaVer">Ver la base guardada igualmente</button>' +
+    '<button id="alertaCerrar">Entendido</button>';
+  el.classList.remove('oculto');
+  $('#alertaCerrar').onclick = cerrar;
+  $('#alertaVer').onclick = () => {
+    Base.cargar(d.paquete);          // sanear() deja en cero los nuevos perdidos
+    Base.origenDatos = 'navegador';
+    el.innerHTML =
+      '<span><b>Estás viendo la base guardada.</b> Las ' + fmtN(d.matriculas) +
+      ' matrículas cuya condición se perdió figuran como continuadores, de modo que ' +
+      '<b>«Nuevos» está subestimado y «Continuadores» sobreestimado</b> hasta que vuelvas a ' +
+      'importar el archivo. Los matriculados totales sí son correctos.</span>' +
+      '<button id="alertaCerrar">Entendido</button>';
+    $('#alertaCerrar').onclick = cerrar;
+    iniciarSeleccion();
+    construirSegmentadores();
+    refrescar();
+  };
 }
 
 document.addEventListener('DOMContentLoaded', iniciar);
