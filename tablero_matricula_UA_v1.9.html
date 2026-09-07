@@ -714,6 +714,9 @@ tfoot td.num{text-align:right}
             Promedio de Edad, Genero, Escala, TipoColegio, DepartamentoResidencia,
             DistritoResidencia, Generacion, Turno, Desertor, Fecha_matricula).
             <b>.json</b>: respaldo generado por este mismo tablero.
+            <br><br>A partir de la columna <b>Nuevos</b> (1 para el ingresante, vacío para el
+            continuador) se construye la dimensión <b>Condición</b>, que permite filtrar todo el
+            tablero por nuevos o continuadores y hace exacto el corte de la edad promedio.
           </span>
         </div>
       </div>
@@ -815,7 +818,7 @@ tfoot td.num{text-align:right}
 
 /* Versión de la aplicación: se muestra en la barra de estado para poder
    confirmar qué copia del archivo se está ejecutando. */
-const VERSION = '1.8';
+const VERSION = '1.9';
 
 const $ = (s, r) => (r || document).querySelector(s);
 const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
@@ -897,12 +900,51 @@ function limpiarCacheTokens() { cacheTokens = {}; }
 
 /** Dimensiones que se ofrecen como segmentador, en orden de uso. */
 const ORDEN_FILTROS = [
-  'Periodo_real', 'Sede', 'Modalidad_estudios', 'Turno', 'Generacion',
+  'Periodo_real', 'Condicion', 'Sede', 'Modalidad_estudios', 'Turno', 'Generacion',
   'DistritoResidencia', 'Carrera', 'Ciclo', 'Genero', 'Escala',
   'TipoColegio', 'DepartamentoResidencia', 'Desertor', 'MesMatricula'
 ];
 /** Dimensiones destacadas por pedido del área usuaria. */
-const DESTACADOS = new Set(['DistritoResidencia', 'Generacion', 'Turno']);
+const DESTACADOS = new Set(['DistritoResidencia', 'Generacion', 'Turno', 'Condicion']);
+
+/* La condición del estudiante como dimensión del modelo. Mientras fue solo una
+   medida (los nuevos contados dentro de cada fila) había cortes que no se
+   podían calcular: la edad se guarda sumada por fila y no se puede repartir
+   entre nuevos y continuadores. Como dimensión, cada fila es homogénea y todo
+   —edad incluida— queda atribuido con exactitud, además de poder filtrarse el
+   tablero entero por condición. La incorporan los archivos importados; la base
+   incrustada, anterior a este cambio, sigue funcionando sin ella. */
+const CLAVE_COND = 'Condicion';
+const COND_NUEVO = 'Nuevo';
+const COND_CONT = 'Continuador';
+
+/** Parte una fila agregada en sus componentes por condición.
+    Con un detalle por estudiante (M = 1) el reparto es exacto: la fila entra
+    entera en uno de los dos lados. Una fila ya agregada y mixta no permite
+    saber la edad de cada grupo, así que se reparte en proporción —lo que
+    conserva intacto el promedio global— y quien llama lo contabiliza. */
+function partirPorCondicion(f) {
+  const M = Math.max(0, Math.round(+f.M || 0));
+  const N = Math.min(Math.max(0, Math.round(+f.N || 0)), M);
+  const SE = Math.max(0, +f.SE || 0), ME = Math.min(Math.max(0, +f.ME || 0), M);
+  const partes = [];
+  const parte = (cond, m, prop) => {
+    if (!m) return;
+    const o = Object.assign({}, f);
+    o[CLAVE_COND] = cond;
+    o.M = m;
+    o.N = cond === COND_NUEVO ? m : 0;
+    o.ME = Math.round(ME * prop);
+    o.SE = Math.round(SE * prop);
+    partes.push(o);
+  };
+  parte(COND_NUEVO, N, M ? N / M : 0);
+  parte(COND_CONT, M - N, M ? (M - N) / M : 0);
+  return { partes, mixta: N > 0 && N < M, M };
+}
+
+/** Etiquetas de las dimensiones que puede añadir una importación. */
+const ETIQUETAS_EXTRA = { Condicion: 'Condición' };
 
 const Base = {
   meta: {}, claves: [], etiquetas: {}, dims: {}, cols: {}, meas: {}, n: 0,
@@ -976,7 +1018,13 @@ const Base = {
   },
 
   /** Sustituye por completo el contenido a partir de filas agregadas. */
-  reemplazar(filas, meta) {
+  reemplazar(filas, meta, claves) {
+    if (claves && claves.join('|') !== this.claves.join('|')) {
+      this.claves = claves.slice();
+      for (const k of this.claves) {
+        if (!this.etiquetas[k]) this.etiquetas[k] = ETIQUETAS_EXTRA[k] || k;
+      }
+    }
     const dims = {}, codigos = {};
     for (const k of this.claves) { dims[k] = []; codigos[k] = new Map(); }
     const cols = {}, meas = { M: [], N: [], SE: [], ME: [] };
@@ -1049,10 +1097,15 @@ function aHex(arr) {
 function sinTildes(s) {
   return String(s).normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
 }
+const ORDEN_COND = { [COND_NUEVO]: 0, [COND_CONT]: 1 };
+
 function ordenValor(clave, a, b) {
   if (a === NO_REG) return b === NO_REG ? 0 : 1;
   if (b === NO_REG) return -1;
   if (clave === 'Ciclo') return (parseInt(a, 10) || 999) - (parseInt(b, 10) || 999);
+  /* La condición se lee mejor con los nuevos delante, no en orden alfabético. */
+  if (clave === CLAVE_COND) return (ORDEN_COND[a] == null ? 9 : ORDEN_COND[a]) -
+    (ORDEN_COND[b] == null ? 9 : ORDEN_COND[b]);
   return sinTildes(a) < sinTildes(b) ? -1 : sinTildes(a) > sinTildes(b) ? 1 : 0;
 }
 
@@ -2097,8 +2150,9 @@ function pintarDemografia() {
   });
   const notaEdad = $('#notaEdad');
   if (notaEdad) {
-    notaEdad.textContent = 'Ponderada por matriculados con edad válida · el corte por condición ' +
-      'usa las filas homogéneas (' + fmtP(cob.pct) + ' de la matrícula filtrada)';
+    notaEdad.textContent = 'Ponderada por matriculados con edad válida · ' + (cob.pct >= 99.995
+      ? 'corte por condición exacto'
+      : 'el corte por condición usa las filas homogéneas (' + fmtP(cob.pct) + ' de la matrícula filtrada)');
   }
   hacerGrafico('chEdad', {
     type: 'line',
@@ -2412,9 +2466,12 @@ function totalGlobal() {
 
 /* Columnas del mantenedor: primero las que identifican el registro, luego las
    medidas y por último el resto de dimensiones (la tabla se desplaza en horizontal). */
-const COLS_MANT_A = ['Periodo_real', 'Carrera', 'Ciclo', 'Turno', 'Generacion', 'DistritoResidencia'];
+const COLS_MANT_A = ['Periodo_real', 'Condicion', 'Carrera', 'Ciclo', 'Turno', 'Generacion', 'DistritoResidencia'];
 const COLS_MANT_B = ['Sede', 'Modalidad_estudios', 'Genero', 'Escala', 'TipoColegio',
   'DepartamentoResidencia', 'Desertor', 'MesMatricula'];
+/* Solo las que existan en la base cargada: una base anterior a la condición
+   sigue abriéndose sin que el mantenedor intente leer una dimensión ausente. */
+const colsMant = lista => lista.filter(k => Base.dims[k]);
 const COLS_MANT = COLS_MANT_A.concat(COLS_MANT_B);
 
 function calcularIndicesMant() {
@@ -2425,7 +2482,7 @@ function calcularIndicesMant() {
     if (usarFiltroPanel && !mascara[i]) continue;
     if (q) {
       let hay = false;
-      for (const k of COLS_MANT) {
+      for (const k of colsMant(COLS_MANT)) {
         if (sinTildes(Base.dims[k][Base.cols[k][i]]).includes(q)) { hay = true; break; }
       }
       if (!hay) continue;
@@ -2451,22 +2508,23 @@ function pintarMantenedor() {
   const desde = Mant.pagina * Mant.porPagina;
   const trozo = Mant.indices.slice(desde, desde + Mant.porPagina);
 
+  const colsA = colsMant(COLS_MANT_A), colsB = colsMant(COLS_MANT_B);
   const th = k => '<th>' + esc(Base.etiquetas[k] || k) + '</th>';
   let h = '<table><thead><tr>' +
-    COLS_MANT_A.map(th).join('') +
+    colsA.map(th).join('') +
     '<th class="num">Matric.</th><th class="num">Nuevos</th><th class="num">Cont.</th>' +
     '<th class="num">Edad</th>' +
-    COLS_MANT_B.map(th).join('') +
+    colsB.map(th).join('') +
     '<th class="acc">Acciones</th></tr></thead><tbody>';
   const celdas = (i, claves) => claves.map(k =>
     '<td style="white-space:nowrap">' + esc(Base.dims[k][Base.cols[k][i]]) + '</td>').join('');
   for (const i of trozo) {
     const M = Base.meas.M[i], N = Base.meas.N[i], ME = Base.meas.ME[i], SE = Base.meas.SE[i];
-    h += '<tr>' + celdas(i, COLS_MANT_A) +
+    h += '<tr>' + celdas(i, colsA) +
       '<td class="num">' + fmtN(M) + '</td><td class="num">' + fmtN(N) + '</td>' +
       '<td class="num">' + fmtN(M - N) + '</td>' +
       '<td class="num">' + (ME ? fmtD(SE / ME) : '—') + '</td>' +
-      celdas(i, COLS_MANT_B) +
+      celdas(i, colsB) +
       '<td class="acc"><div class="acc-fila"><button data-edit="' + i + '">Editar</button>' +
       '<button class="del" data-del="' + i + '">Eliminar</button></div></td></tr>';
   }
@@ -2547,7 +2605,11 @@ function guardarRegistro() {
     const v = s.value === '__nuevo' ? NO_REG : s.value.trim();
     fila[s.dataset.k] = v || NO_REG;
   }
-  fila.M = M; fila.N = N;
+  fila.M = M;
+  /* Con la condición como dimensión, los nuevos de la fila los determina ella:
+     mantener ambos campos por separado permitiría guardar un «Nuevo» con cero
+     nuevos, que es justo la incoherencia que este cambio elimina. */
+  fila.N = fila[CLAVE_COND] ? (fila[CLAVE_COND] === COND_NUEVO ? M : 0) : N;
   fila.ME = E > 0 ? M : 0;
   fila.SE = E > 0 ? Math.round(E * M) : 0;
 
@@ -2578,6 +2640,7 @@ function eliminarRegistro(indice) {
 
 function trasCambioBase(msg) {
   iniciarSeleccion();
+  poblarSelectores();          // la importación puede haber añadido dimensiones
   construirSegmentadores();
   refrescar();
   pintarMantenedor();
@@ -2620,12 +2683,25 @@ async function procesarImportacion() {
       throw new Error('Formato no soportado. Usa .xlsx, .csv o .json');
     }
 
+    /* Las filas importadas traen la condición; la base previa puede no tenerla.
+       Antes de fusionar se lleva todo al mismo juego de claves, o el agregado
+       se haría con claves distintas y la condición se perdería. */
+    const clavesFin = filas.some(f => f[CLAVE_COND]) ? clavesConCondicion() : Base.claves.slice();
     if (modo === 'agregar') {
       const previas = [];
       for (let i = 0; i < Base.n; i++) previas.push(Base.fila(i));
-      filas = combinarFilas(previas.concat(filas));
+      let anteriores = previas;
+      if (clavesFin.indexOf(CLAVE_COND) >= 0) {
+        const r = anadirCondicion(previas);
+        anteriores = r.filas;
+        if (r.mixtas) {
+          avisoImportacion += ' De la base anterior, ' + fmtN(r.mixtas) + ' matrículas estaban en ' +
+            'filas mixtas y su edad se prorrateó al separarlas por condición.';
+        }
+      }
+      filas = combinarFilas(anteriores.concat(filas), clavesFin);
     }
-    Base.reemplazar(filas, { origen: arch.name, generado: new Date().toLocaleString('es-PE') });
+    Base.reemplazar(filas, { origen: arch.name, generado: new Date().toLocaleString('es-PE') }, clavesFin);
     Base.origenDatos = 'navegador';
     Base.anotar('Importación ' + modo + ' desde ' + arch.name + ' → ' + Base.n + ' registros agregados');
     est.innerHTML = 'Listo: la base quedó con <b>' + fmtN(Base.n) + '</b> registros.' +
@@ -2716,9 +2792,12 @@ function agregarDetalle(tabla) {
   };
 
   const mapa = new Map();
+  let nMixtas = 0;
+  const clavesModelo = clavesConCondicion();
   for (const f of tabla.filas) {
     const reg = {};
     for (const k of Base.claves) {
+      if (k === CLAVE_COND) continue;   // se asigna al repartir la fila
       if (k === 'MesMatricula') { reg[k] = mesDeFecha(f[idx[normalizaCol('Fecha_matricula')]]); continue; }
       if (k === 'Ciclo') {
         const c = num(f, 'Ciclo');
@@ -2733,11 +2812,22 @@ function agregarDetalle(tabla) {
     const N = nuevosDe(f, M);
     const edad = num(f, 'Promedio de Edad');
     const valida = edad > 13 && edad <= 90;
-    const clave = Base.claves.map(k => reg[k]).join('\u0001');
-    let o = mapa.get(clave);
-    if (!o) { o = Object.assign({}, reg, { M: 0, N: 0, SE: 0, ME: 0 }); mapa.set(clave, o); }
-    o.M += M; o.N += N;
-    if (valida) { o.SE += edad * M; o.ME += M; }
+    /* La condición entra como una dimensión más: la fila del archivo se reparte
+       entre nuevos y continuadores antes de agregarse, de modo que cada fila
+       del modelo queda homogénea y la edad de cada grupo es atribuible. */
+    reg[CLAVE_COND] = N >= M ? COND_NUEVO : N <= 0 ? COND_CONT : null;
+    const partes = reg[CLAVE_COND]
+      ? [{ cond: reg[CLAVE_COND], m: M }]
+      : (nMixtas += M, [{ cond: COND_NUEVO, m: N }, { cond: COND_CONT, m: M - N }]);
+    for (const { cond, m } of partes) {
+      if (!m) continue;
+      reg[CLAVE_COND] = cond;
+      const clave = clavesModelo.map(k => reg[k]).join('\u0001');
+      let o = mapa.get(clave);
+      if (!o) { o = Object.assign({}, reg, { M: 0, N: 0, SE: 0, ME: 0 }); mapa.set(clave, o); }
+      o.M += m; o.N += cond === COND_NUEVO ? m : 0;
+      if (valida) { o.SE += edad * m; o.ME += m; }
+    }
   }
   const out = Array.from(mapa.values());
   out.forEach(o => { o.SE = Math.round(o.SE); });
@@ -2764,25 +2854,53 @@ function agregarDetalle(tabla) {
         '» se contaron como continuadores.');
     }
   }
+  if (nMixtas) {
+    avisos.push(fmtN(nMixtas) + ' matrículas venían en filas ya agregadas que mezclan nuevos y ' +
+      'continuadores: se repartieron entre ambas condiciones y su edad se prorrateó, así que el ' +
+      'promedio global es exacto pero el de cada condición es aproximado en esa parte.');
+  }
   const sinEdad = leidas - out.reduce((t, o) => t + o.ME, 0);
   if (sinEdad > 0) avisos.push(fmtN(sinEdad) + ' matrículas sin edad válida (14 a 90 años) quedan fuera del promedio de edad.');
   avisoImportacion = avisos.join(' ');
   return out;
 }
 
-function combinarFilas(filas) {
+function combinarFilas(filas, claves) {
+  const ks = claves || Base.claves;
   const mapa = new Map();
   for (const f of filas) {
-    const clave = Base.claves.map(k => f[k]).join('\u0001');
+    const clave = ks.map(k => f[k]).join('\u0001');
     let o = mapa.get(clave);
     if (!o) {
-      o = {}; for (const k of Base.claves) o[k] = f[k];
+      o = {}; for (const k of ks) o[k] = f[k];
       o.M = 0; o.N = 0; o.SE = 0; o.ME = 0;
       mapa.set(clave, o);
     }
     o.M += +f.M || 0; o.N += +f.N || 0; o.SE += +f.SE || 0; o.ME += +f.ME || 0;
   }
   return Array.from(mapa.values());
+}
+
+/** Claves del modelo con la condición incluida (al final, tras las existentes). */
+function clavesConCondicion() {
+  return Base.claves.indexOf(CLAVE_COND) >= 0
+    ? Base.claves.slice()
+    : Base.claves.concat([CLAVE_COND]);
+}
+
+/** Añade la condición a filas que aún no la tienen (la base previa al cambio),
+    partiéndolas en sus dos componentes. Devuelve las filas y cuántas matrículas
+    procedían de filas mixtas, cuya edad hubo que prorratear. */
+function anadirCondicion(filas) {
+  const out = [];
+  let mixtas = 0;
+  for (const f of filas) {
+    if (f[CLAVE_COND]) { out.push(f); continue; }
+    const r = partirPorCondicion(f);
+    if (r.mixta) mixtas += r.M;
+    for (const p of r.partes) out.push(p);
+  }
+  return { filas: out, mixtas };
 }
 
 function normalizaCol(c) {
@@ -3478,14 +3596,26 @@ function cambiarPagina(id) {
 }
 
 function poblarSelectores() {
-  const opciones = ORDEN_FILTROS.map(k =>
+  /* Solo dimensiones que existan en la base cargada: la condición aparece tras
+     importar un archivo y no debe ofrecerse antes, o el explorador intentaría
+     agrupar por una columna inexistente. Se vuelve a llamar en cada cambio de
+     base y se conserva la elección del usuario si sigue siendo válida. */
+  const disponibles = ORDEN_FILTROS.filter(k => Base.dims[k]);
+  const opciones = disponibles.map(k =>
     '<option value="' + k + '">' + esc(Base.etiquetas[k] || k) + '</option>').join('');
-  $('#expDim').innerHTML = opciones;
-  $('#expDim').value = 'Carrera';
-  $('#mzFila').innerHTML = opciones;
-  $('#mzFila').value = 'Carrera';
-  $('#mzCol').innerHTML = '<option value="">— Sin columnas —</option>' + opciones;
-  $('#mzCol').value = '';
+  const fijar = (sel2, html, previo, porDefecto) => {
+    const e = $(sel2);
+    if (!e) return;
+    const antes = e.value;
+    e.innerHTML = html;
+    const quiere = previo !== undefined ? previo : antes;
+    e.value = disponibles.indexOf(quiere) >= 0 || quiere === '' ? quiere : porDefecto;
+    if (!e.value && porDefecto) e.value = porDefecto;
+  };
+  const base = disponibles.indexOf('Carrera') >= 0 ? 'Carrera' : disponibles[0];
+  fijar('#expDim', opciones, undefined, base);
+  fijar('#mzFila', opciones, undefined, base);
+  fijar('#mzCol', '<option value="">— Sin columnas —</option>' + opciones, undefined, '');
 }
 
 function conectarEventos() {
