@@ -1,0 +1,306 @@
+<div class="cinta">
+  <div class="marca">
+    <div class="logo">UA</div>
+    <div>
+      <h1>Modelo de Proyección de Matrícula</h1>
+      <div class="sub">Universidad Autónoma del Perú · flujo de cohortes con escenarios</div>
+    </div>
+  </div>
+  <div class="acciones">
+    <input type="file" id="archivo" accept=".xlsx,.csv" hidden>
+    <button class="bt" onclick="$('#archivo').click()">
+      <svg viewBox="0 0 24 24"><path d="M12 16V4m0 0L8 8m4-4 4 4"/><path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/></svg>
+      Cargar ingresantes
+    </button>
+    <button class="bt" onclick="descargarPlantilla()">
+      <svg viewBox="0 0 24 24"><path d="M14 3v5h5"/><path d="M19 21H5a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h9l6 6v11a1 1 0 0 1-1 1z"/></svg>
+      Plantilla
+    </button>
+    <button class="bt pri" id="btExportar" onclick="exportarExcel()" disabled>
+      <svg viewBox="0 0 24 24"><path d="M12 4v12m0 0 4-4m-4 4-4-4"/><path d="M4 18v2a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-2"/></svg>
+      Exportar proyección
+    </button>
+    <button class="bt" onclick="alternarTema()" title="Modo claro / oscuro">
+      <svg viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+    </button>
+  </div>
+</div>
+
+<div class="control">
+  <div class="campo">
+    <label for="horizonte">Semestres a proyectar</label>
+    <input type="number" id="horizonte" min="1" max="24" value="6" step="1">
+    <div class="pista" id="pistaHorizonte"></div>
+  </div>
+  <div class="campo">
+    <label for="confianza">Nivel de confianza</label>
+    <select id="confianza">
+      <option value="0.80" selected>80 %</option>
+      <option value="0.90">90 %</option>
+      <option value="0.95">95 %</option>
+    </select>
+    <div class="pista" id="pistaConf"></div>
+  </div>
+  <div class="campo">
+    <label for="escenarioVista">Escenario en tablas</label>
+    <select id="escenarioVista">
+      <option value="alt">Optimista</option>
+      <option value="cen" selected>Moderado</option>
+      <option value="baj">Pesimista</option>
+    </select>
+    <div class="pista">afecta al detalle y los cruces</div>
+  </div>
+  <div class="sep"></div>
+  <div class="campo">
+    <label>&nbsp;</label>
+    <button class="bt" style="background:var(--sup2);color:var(--tinta);border-color:var(--linea)"
+            onclick="$('#avanzado').classList.toggle('on')">Parámetros avanzados</button>
+  </div>
+  <div class="avz" id="avanzado">
+    <div class="campo">
+      <label for="lam">λ recencia (continuación)</label>
+      <input type="number" id="lam" min="0.05" max="1" step="0.05" value="0.50">
+      <div class="pista">1 = todo el histórico pesa igual</div>
+    </div>
+    <div class="campo">
+      <label for="lamN">λ recencia (turno de ingresantes)</label>
+      <input type="number" id="lamN" min="0.05" max="1" step="0.05" value="0.30">
+      <div class="pista">seleccionadas por backtesting</div>
+    </div>
+    <div class="campo">
+      <label for="factorK">Factor de contracción</label>
+      <input type="number" id="factorK" min="0.1" max="10" step="0.1" value="1.0">
+      <div class="pista">multiplica las k empírico-Bayes</div>
+    </div>
+  </div>
+</div>
+
+<nav id="pestanas">
+  <button data-pg="resumen" class="on">Resumen</button>
+  <button data-pg="detalle">Detalle de la proyección</button>
+  <button data-pg="ingresantes">Ingresantes</button>
+  <button data-pg="modelo">Modelo y validación</button>
+</nav>
+
+<main>
+<!-- ==================== RESUMEN ==================== -->
+<section class="pagina on" id="pg-resumen">
+  <div id="avisoInicio"></div>
+
+  <div class="rejilla r3" id="kpis"></div>
+
+  <div class="tarjeta" id="tjSerie">
+    <header><h2>Matrícula total por semestre académico</h2></header>
+    <div class="nota">
+      Serie observada y proyección bajo los tres escenarios. La banda recoge el
+      desplazamiento sistémico de la tasa de continuación; el intervalo de
+      predicción, más ancho, añade la variabilidad de realización y se muestra
+      en la tabla siguiente.
+    </div>
+    <div class="leyenda" id="legSerie"></div>
+    <div class="lienzo" id="grSerie"></div>
+  </div>
+
+  <div class="rejilla r2" id="tjComposicion">
+    <div class="tarjeta">
+      <header><h2>Composición de la matrícula</h2></header>
+      <div class="nota">Ingresantes frente a continuadores, escenario moderado.</div>
+      <div class="leyenda" id="legComp"></div>
+      <div class="lienzo" id="grComp"></div>
+    </div>
+    <div class="tarjeta">
+      <header><h2>Matrícula por sede</h2></header>
+      <div class="nota">Escenario moderado.</div>
+      <div class="leyenda" id="legSede"></div>
+      <div class="lienzo" id="grSede"></div>
+    </div>
+  </div>
+
+  <div class="tarjeta" id="tjResumen">
+    <header><h2>Resumen por semestre y escenario</h2></header>
+    <div class="nota">
+      Los escenarios son estados coherentes y aditivos: el total de cada escenario
+      es la suma de sus celdas. El intervalo de predicción cuantifica además el
+      azar de realización y no es aditivo entre celdas.
+    </div>
+    <div class="envoltura"><table id="tbResumen"></table></div>
+  </div>
+</section>
+
+<!-- ==================== DETALLE ==================== -->
+<section class="pagina" id="pg-detalle">
+  <div class="tarjeta" id="tjFiltros">
+    <header><h2>Filtros</h2></header>
+    <div style="display:flex;gap:18px;flex-wrap:wrap;align-items:flex-end;margin-top:8px">
+      <div class="campo"><label for="fPeriodo">Semestre</label><select id="fPeriodo"></select></div>
+      <div class="campo"><label for="fSede">Sede</label><select id="fSede"></select></div>
+      <div class="campo"><label for="fCarrera">Carrera</label><select id="fCarrera"></select></div>
+      <div class="campo"><label for="fTurno">Turno</label><select id="fTurno"></select></div>
+      <div class="campo"><label for="fFila">Agrupar filas por</label>
+        <select id="fFila">
+          <option value="Carrera" selected>Carrera</option>
+          <option value="Sede">Sede</option>
+          <option value="Ciclo">Ciclo</option>
+          <option value="Turno">Turno</option>
+          <option value="Periodo">Semestre</option>
+        </select></div>
+      <div class="campo"><label for="fCol">Agrupar columnas por</label>
+        <select id="fCol">
+          <option value="">— sin columnas —</option>
+          <option value="Ciclo" selected>Ciclo</option>
+          <option value="Turno">Turno</option>
+          <option value="Sede">Sede</option>
+          <option value="Periodo">Semestre</option>
+        </select></div>
+    </div>
+  </div>
+
+  <div class="tarjeta" id="tjCruce">
+    <header><h2 id="ttDetalle">Cruce de la proyección</h2><span class="mini" id="subDetalle"></span></header>
+    <div class="envoltura alta"><table id="tbDetalle"></table></div>
+  </div>
+
+  <div class="tarjeta" id="tjCeldas">
+    <header><h2>Detalle completo por celda</h2><span class="mini">semestre · sede · carrera · ciclo · turno</span></header>
+    <div class="nota">
+      Se listan las 300 celdas de mayor matrícula del filtro activo. La exportación
+      a Excel incluye todas las celdas de todos los semestres y escenarios.
+    </div>
+    <div class="envoltura alta"><table id="tbCeldas"></table></div>
+  </div>
+</section>
+
+<!-- ==================== INGRESANTES ==================== -->
+<section class="pagina" id="pg-ingresantes">
+  <div class="tarjeta" id="tjArchivo">
+    <header><h2>Archivo de ingresantes</h2></header>
+    <div id="estadoArchivo"></div>
+  </div>
+
+  <div class="tarjeta" id="tjTurnoNuevos">
+    <header><h2>Reparto estimado por turno</h2></header>
+    <div class="nota">
+      El archivo de entrada no declara el turno: el modelo lo estima con una
+      composición multinomial contraída jerárquicamente
+      (celda → sede·carrera·paridad → sede·carrera → sede·paridad → sede → global).
+      Una carrera sin historia propia se queda en el nivel más fino que sí la tenga,
+      de modo que un programa nuevo hereda el reparto de su sede.
+    </div>
+    <div class="envoltura alta"><table id="tbIngresantes"></table></div>
+  </div>
+</section>
+
+<!-- ==================== MODELO ==================== -->
+<section class="pagina" id="pg-modelo">
+  <div class="tarjeta" id="tjEcuacion">
+    <header><h2>Ecuación del modelo</h2></header>
+    <p class="txt">
+      La matrícula de un semestre es la suma de los ingresantes declarados en el
+      archivo de entrada y de los continuadores que provienen de semestres
+      anteriores. El flujo de continuadores se modela como una cadena de Markov de
+      cohortes con rezagos múltiples, estimada sobre las trayectorias individuales
+      del histórico.
+    </p>
+    <div class="formula" id="ecuacion"></div>
+    <p class="txt">
+      El rezago <code>L</code> recoge el reingreso tras una pausa: un estudiante que
+      interrumpe uno o más semestres y regresa no se pierde como desertor, sino que
+      reaparece con rezago <code>L&gt;1</code>. Cada probabilidad se estima por
+      contracción empírico-Bayes hacia niveles cada vez más agregados, de modo que
+      las celdas con poca evidencia toman prestada información de su padre.
+    </p>
+    <dl class="par" id="parModelo"></dl>
+  </div>
+
+  <div class="rejilla r2" id="tjContinuacion">
+    <div class="tarjeta">
+      <header><h2>Tasa de continuación por ciclo</h2></header>
+      <div class="nota">
+        Probabilidad de volver a matricularse en el semestre inmediato siguiente.
+        La caída de los ciclos terminales es egreso, no deserción.
+      </div>
+      <div class="leyenda" id="legCont"></div>
+      <div class="lienzo" id="grCont"></div>
+    </div>
+    <div class="tarjeta">
+      <header><h2>Avance de ciclo de los continuadores</h2></header>
+      <div class="nota">Distribución del salto de ciclo entre quienes se rematriculan.</div>
+      <div class="lienzo" id="grAvance"></div>
+    </div>
+  </div>
+
+  <div class="rejilla r2" id="tjTurnoPeriodo">
+    <div class="tarjeta">
+      <header><h2>Transición de turno</h2></header>
+      <div class="nota">Probabilidad de pasar del turno de origen (fila) a cada turno de destino.</div>
+      <div class="envoltura"><table id="tbTurno"></table></div>
+    </div>
+    <div class="tarjeta">
+      <header><h2>Efectos de periodo estimados</h2></header>
+      <div class="nota">
+        Desviación de cada semestre respecto de la media, en escala logit, tras
+        controlar por ciclo. Su dispersión residual —una vez descontada la
+        estacionalidad— es la que gradúa los escenarios.
+      </div>
+      <div class="lienzo" id="grPeriodo"></div>
+    </div>
+  </div>
+
+  <div class="tarjeta" id="tjIncertidumbre">
+    <header><h2>Descomposición de la incertidumbre</h2></header>
+    <p class="txt">
+      La volatilidad de la tasa de continuación se separa en tres componentes con
+      comportamientos distintos al agregar celdas:
+    </p>
+    <ul class="txt">
+      <li><b>Muestral.</b> Ruido binomial de cada celda, <code>p(1−p)/n</code>. Se
+          diluye al agregar, así que no explica la incertidumbre del total.</li>
+      <li><b>Estacional.</b> Diferencia sistemática entre el primer y el segundo
+          semestre. Es predecible y ya está incorporada al punto central, porque
+          las tasas se estiman condicionando en la paridad del semestre.</li>
+      <li><b>Choque de periodo.</b> Lo que resta tras descontar ciclo y
+          estacionalidad. Es común a todas las cohortes de un mismo semestre, de
+          modo que <i>no</i> se cancela al agregar: es el componente que gradúa los
+          escenarios.</li>
+    </ul>
+    <div class="rejilla r3" style="margin-top:12px" id="kpiVar"></div>
+    <div class="formula" id="formulaBanda"></div>
+  </div>
+
+  <div class="tarjeta" id="tjValidacion">
+    <header><h2>Validación fuera de muestra</h2><span class="mini">backtesting de origen móvil</span></header>
+    <p class="txt">
+      Se reestima el modelo con la información disponible hasta cada semestre de
+      corte y se proyecta el resto, comparando con lo realmente observado. La
+      métrica es el error porcentual absoluto ponderado (EPAP), que pondera cada
+      celda por su matrícula y evita que las celdas diminutas dominen el promedio.
+    </p>
+    <div class="rejilla r2" style="margin-top:12px">
+      <div>
+        <h3 style="margin-bottom:7px">Error por nivel de agregación (%)</h3>
+        <div class="envoltura"><table id="tbEpap"></table></div>
+      </div>
+      <div>
+        <h3 style="margin-bottom:7px">Cobertura empírica del intervalo (%)</h3>
+        <div class="envoltura"><table id="tbCob"></table></div>
+      </div>
+    </div>
+    <div class="aviso" style="margin-top:13px" id="lecturaValidacion"></div>
+  </div>
+
+  <div class="tarjeta" id="tjLambda">
+    <header><h2>Selección de la ponderación de recencia</h2></header>
+    <div class="nota">
+      Error fuera de muestra según λ, indexado al mínimo de cada serie (100 = la
+      mejor λ de ese nivel). El mínimo interior justifica la ponderación elegida:
+      el histórico reciente predice mejor que el promedio de toda la serie porque
+      la retención y la mezcla de turno están en deriva.
+    </div>
+    <div class="leyenda" id="legLambda"></div>
+    <div class="lienzo" id="grLambda"></div>
+  </div>
+</section>
+</main>
+
+<div id="brindis"></div>
+<div class="emer" id="emer"></div>

@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="es" data-tema="claro">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Modelo de Proyección de Matrícula · Universidad Autónoma del Perú</title>
+<style>
+/* ============================================================
+   Tokens de color. Modo claro por defecto; el conmutador estampa
+   data-tema="oscuro" en <html> y redefine los mismos roles.
+   Paleta categórica validada (ΔE CVD ≥ 8 en ambos modos).
+   ============================================================ */
+:root{
+  --plano:#f9f9f7; --sup:#fcfcfb; --sup2:#f2f1ed;
+  --tinta:#0b0b0b; --tinta2:#52514e; --tinta3:#898781;
+  --linea:rgba(11,11,11,.10); --grilla:#e1e0d9; --eje:#c3c2b7;
+  --barra:#12233f; --barra-tinta:#ffffff; --acento:#eda100;
+  --s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a; --s4:#eda100;
+  --s5:#e87ba4; --s6:#4a3aa7;
+  --ok:#0ca30c; --alerta:#fab219; --grave:#ec835a; --critico:#d03b3b;
+  --seq1:#cde2fb; --seq2:#9ec5f4; --seq3:#5598e7; --seq4:#2a78d6; --seq5:#184f95;
+  --banda:rgba(42,120,214,.16);
+  --sombra:0 1px 2px rgba(11,11,11,.06), 0 1px 8px rgba(11,11,11,.04);
+  --r:8px;
+}
+html[data-tema="oscuro"]{
+  --plano:#0d0d0d; --sup:#1a1a19; --sup2:#232322;
+  --tinta:#ffffff; --tinta2:#c3c2b7; --tinta3:#898781;
+  --linea:rgba(255,255,255,.10); --grilla:#2c2c2a; --eje:#383835;
+  --barra:#111827; --barra-tinta:#ffffff;
+  --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500;
+  --s5:#d55181; --s6:#9085e9;
+  --seq1:#184f95; --seq2:#256abf; --seq3:#3987e5; --seq4:#86b6ef; --seq5:#cde2fb;
+  --banda:rgba(57,135,229,.20);
+  --sombra:0 1px 2px rgba(0,0,0,.5);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{
+  font-family:system-ui,-apple-system,'Segoe UI',sans-serif;
+  background:var(--plano);color:var(--tinta);font-size:13px;line-height:1.45;
+  -webkit-font-smoothing:antialiased;
+}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer}
+h2{font-size:14px;font-weight:650;letter-spacing:.1px}
+h3{font-size:12.5px;font-weight:600}
+
+/* ---------- Cinta superior ---------- */
+.cinta{
+  background:var(--barra);color:var(--barra-tinta);
+  display:flex;align-items:center;gap:16px;padding:10px 20px;
+  border-bottom:3px solid var(--acento);flex-wrap:wrap;
+}
+.cinta .marca{display:flex;align-items:center;gap:11px;min-width:0}
+.cinta .logo{
+  width:34px;height:34px;border-radius:7px;background:var(--acento);color:#12233f;
+  display:grid;place-items:center;font-weight:800;font-size:13px;letter-spacing:-.5px;flex:none;
+}
+.cinta h1{font-size:15px;font-weight:650;letter-spacing:.1px}
+.cinta .sub{font-size:11px;opacity:.72}
+.cinta .acciones{margin-left:auto;display:flex;gap:7px;flex-wrap:wrap}
+.bt{
+  background:rgba(255,255,255,.10);border:1px solid rgba(255,255,255,.20);
+  color:var(--barra-tinta);padding:6px 12px;border-radius:6px;font-size:12px;font-weight:550;
+  display:inline-flex;align-items:center;gap:6px;white-space:nowrap;
+}
+.bt:hover{background:rgba(255,255,255,.20)}
+.bt.pri{background:var(--acento);border-color:var(--acento);color:#12233f;font-weight:650}
+.bt.pri:hover{background:#ffb524}
+.bt:disabled{opacity:.45;cursor:not-allowed}
+.bt svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+
+/* ---------- Barra de control ---------- */
+.control{
+  background:var(--sup);border-bottom:1px solid var(--linea);
+  padding:11px 20px;display:flex;gap:22px;align-items:flex-end;flex-wrap:wrap;
+}
+.campo{display:flex;flex-direction:column;gap:4px;min-width:0}
+.campo label{font-size:10.5px;font-weight:600;color:var(--tinta3);text-transform:uppercase;letter-spacing:.4px}
+.campo select,.campo input[type=number]{
+  background:var(--sup2);border:1px solid var(--linea);border-radius:6px;
+  padding:6px 9px;font-size:12.5px;min-width:120px;
+}
+.campo input[type=number]{width:86px;min-width:0}
+.campo .pista{font-size:10.5px;color:var(--tinta3)}
+.control .sep{width:1px;align-self:stretch;background:var(--linea)}
+.avz{display:none;gap:22px;align-items:flex-end;flex-wrap:wrap}
+.avz.on{display:flex}
+
+/* ---------- Pestañas ---------- */
+#pestanas{
+  display:flex;gap:2px;padding:0 20px;background:var(--sup);
+  border-bottom:1px solid var(--linea);overflow-x:auto;
+}
+#pestanas button{
+  background:none;border:none;border-bottom:2px solid transparent;
+  padding:9px 14px;font-size:12.5px;font-weight:550;color:var(--tinta2);white-space:nowrap;
+}
+#pestanas button:hover{color:var(--tinta)}
+#pestanas button.on{color:var(--tinta);border-bottom-color:var(--acento);font-weight:650}
+
+/* ---------- Lienzo ---------- */
+main{padding:16px 20px 40px}
+.pagina{display:none}
+.pagina.on{display:block}
+.rejilla{display:grid;gap:14px}
+.r2{grid-template-columns:repeat(auto-fit,minmax(380px,1fr))}
+.r3{grid-template-columns:repeat(auto-fit,minmax(250px,1fr))}
+.tarjeta{
+  background:var(--sup);border:1px solid var(--linea);border-radius:var(--r);
+  padding:14px 16px;box-shadow:var(--sombra);min-width:0;
+}
+.tarjeta>header{display:flex;align-items:baseline;gap:10px;margin-bottom:2px;flex-wrap:wrap}
+.tarjeta .nota{font-size:11px;color:var(--tinta3);margin-bottom:10px;line-height:1.5}
+.tarjeta+.tarjeta,.rejilla+.rejilla,.rejilla+.tarjeta,.tarjeta+.rejilla{margin-top:14px}
+
+/* ---------- Indicadores ---------- */
+.kpi{background:var(--sup);border:1px solid var(--linea);border-radius:var(--r);padding:13px 15px;box-shadow:var(--sombra)}
+.kpi .et{font-size:10.5px;font-weight:600;color:var(--tinta3);text-transform:uppercase;letter-spacing:.4px}
+.kpi .vl{font-size:27px;font-weight:680;letter-spacing:-.8px;margin-top:3px;font-variant-numeric:tabular-nums}
+.kpi .de{font-size:11px;color:var(--tinta2);margin-top:2px}
+.kpi .de b{font-variant-numeric:tabular-nums}
+.pin{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:5px;vertical-align:baseline}
+
+/* ---------- Tablas ---------- */
+.envoltura{overflow-x:auto;margin:0 -16px;padding:0 16px}
+/* Las tablas de cientos de filas se confinan a una altura legible; el
+   encabezado pegajoso se mantiene visible al desplazarse dentro de ellas. */
+.envoltura.alta{max-height:520px;overflow-y:auto}
+table{border-collapse:collapse;width:100%;font-size:12px}
+th,td{padding:5px 9px;text-align:right;white-space:nowrap;border-bottom:1px solid var(--linea)}
+th:first-child,td:first-child{text-align:left}
+th{
+  font-size:10.5px;font-weight:650;color:var(--tinta3);text-transform:uppercase;
+  letter-spacing:.3px;position:sticky;top:0;background:var(--sup);z-index:1;
+}
+td{font-variant-numeric:tabular-nums}
+tbody tr:hover{background:var(--sup2)}
+tr.tot td{font-weight:680;border-top:2px solid var(--eje);background:var(--sup2)}
+td.txt,th.txt{text-align:left;white-space:normal;min-width:170px}
+.mini{font-size:11px;color:var(--tinta3)}
+
+/* ---------- Gráficos ---------- */
+.lienzo{position:relative;width:100%}
+svg.gr{display:block;width:100%;overflow:visible}
+svg.gr text{fill:var(--tinta2);font-size:10.5px}
+svg.gr .ejeTxt{fill:var(--tinta3);font-size:10px}
+svg.gr .grid{stroke:var(--grilla);stroke-width:1}
+svg.gr .eje{stroke:var(--eje);stroke-width:1}
+svg.gr .rot{fill:var(--tinta);font-size:10.5px;font-weight:600}
+.leyenda{display:flex;gap:14px;flex-wrap:wrap;margin:2px 0 8px;font-size:11.5px;color:var(--tinta2)}
+.leyenda span{display:inline-flex;align-items:center;gap:5px}
+.emer{
+  position:fixed;pointer-events:none;z-index:80;background:var(--sup);
+  border:1px solid var(--linea);border-radius:6px;padding:7px 10px;font-size:11.5px;
+  box-shadow:0 3px 14px rgba(0,0,0,.18);opacity:0;transition:opacity .1s;max-width:280px;
+}
+.emer.ver{opacity:1}
+.emer b{font-variant-numeric:tabular-nums}
+.emer table{font-size:11px}
+.emer td,.emer th{border:none;padding:1px 4px}
+
+/* ---------- Varios ---------- */
+#brindis{
+  position:fixed;left:50%;bottom:26px;transform:translateX(-50%) translateY(14px);
+  background:var(--barra);color:#fff;padding:9px 17px;border-radius:7px;font-size:12.5px;
+  opacity:0;pointer-events:none;transition:.2s;z-index:90;box-shadow:0 5px 20px rgba(0,0,0,.3);
+}
+#brindis.ver{opacity:1;transform:translateX(-50%)}
+#brindis.mal{background:var(--critico)}
+.aviso{
+  background:var(--sup2);border-left:3px solid var(--acento);border-radius:0 6px 6px 0;
+  padding:10px 13px;font-size:12px;color:var(--tinta2);line-height:1.55;
+}
+.aviso.err{border-left-color:var(--critico)}
+.vacio{padding:44px 20px;text-align:center;color:var(--tinta3);font-size:12.5px}
+.vacio svg{width:38px;height:38px;stroke:var(--eje);fill:none;stroke-width:1.5;margin-bottom:10px}
+.pastilla{
+  display:inline-block;padding:1px 7px;border-radius:20px;font-size:10.5px;font-weight:600;
+  background:var(--sup2);color:var(--tinta2);border:1px solid var(--linea);
+}
+.pastilla.nueva{background:rgba(237,161,0,.16);border-color:var(--acento);color:var(--tinta)}
+dl.par{display:grid;grid-template-columns:auto 1fr;gap:3px 14px;font-size:12px;margin-top:4px}
+dl.par dt{color:var(--tinta3)}
+dl.par dd{font-variant-numeric:tabular-nums;text-align:right}
+code{font-family:ui-monospace,'SF Mono',Menlo,Consolas,monospace;font-size:11.5px;background:var(--sup2);padding:1px 5px;border-radius:4px}
+.formula{
+  background:var(--sup2);border-radius:6px;padding:11px 14px;margin:9px 0;
+  font-family:ui-monospace,'SF Mono',Menlo,Consolas,monospace;font-size:11.5px;
+  line-height:1.75;overflow-x:auto;color:var(--tinta);
+  white-space:pre-wrap;          /* la ecuación va maquetada con saltos propios */
+}
+.leyenda i.pin.linea{height:3px;border-radius:2px;width:16px}
+.leyenda i.pin.banda{height:11px;border-radius:2px;width:16px}
+p.txt{font-size:12.5px;color:var(--tinta2);line-height:1.65;max-width:74ch}
+p.txt+p.txt{margin-top:8px}
+ul.txt{font-size:12.5px;color:var(--tinta2);line-height:1.65;margin:7px 0 7px 19px;max-width:74ch}
+ul.txt li{margin-bottom:4px}
+@media(max-width:760px){
+  main{padding:12px 14px 34px}
+  .cinta,.control,#pestanas{padding-left:14px;padding-right:14px}
+  .envoltura{margin:0 -14px;padding:0 14px}
+  .kpi .vl{font-size:23px}
+}
+</style>
+</head>
+<body>
