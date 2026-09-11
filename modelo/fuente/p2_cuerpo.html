@@ -59,7 +59,7 @@
   <div class="avz" id="avanzado">
     <div class="campo">
       <label for="lam">λ recencia (continuación)</label>
-      <input type="number" id="lam" min="0.05" max="1" step="0.05" value="0.50">
+      <input type="number" id="lam" min="0.05" max="1" step="0.05" value="0.65">
       <div class="pista">1 = todo el histórico pesa igual</div>
     </div>
     <div class="campo">
@@ -116,6 +116,18 @@
     </div>
   </div>
 
+  <div class="tarjeta" id="tjModalidadSerie">
+    <header><h2>Composición por modalidad de estudios</h2></header>
+    <div class="nota">
+      Serie observada y proyectada, escenario moderado. La modalidad a distancia
+      pasó del 4,8 % de la matrícula en 2023-I al 19,6 % en 2026-II, y su
+      continuación en el primer ciclo es 29 puntos menor que la presencial: es la
+      variable de composición que más mueve la proyección.
+    </div>
+    <div class="leyenda" id="legModalidad"></div>
+    <div class="lienzo" id="grModalidad"></div>
+  </div>
+
   <div class="tarjeta" id="tjResumen">
     <header><h2>Resumen por semestre y escenario</h2></header>
     <div class="nota">
@@ -135,11 +147,13 @@
       <div class="campo"><label for="fPeriodo">Semestre</label><select id="fPeriodo"></select></div>
       <div class="campo"><label for="fSede">Sede</label><select id="fSede"></select></div>
       <div class="campo"><label for="fCarrera">Carrera</label><select id="fCarrera"></select></div>
+      <div class="campo"><label for="fModalidad">Modalidad</label><select id="fModalidad"></select></div>
       <div class="campo"><label for="fTurno">Turno</label><select id="fTurno"></select></div>
       <div class="campo"><label for="fFila">Agrupar filas por</label>
         <select id="fFila">
           <option value="Carrera" selected>Carrera</option>
           <option value="Sede">Sede</option>
+          <option value="Modalidad">Modalidad</option>
           <option value="Ciclo">Ciclo</option>
           <option value="Turno">Turno</option>
           <option value="Periodo">Semestre</option>
@@ -148,6 +162,7 @@
         <select id="fCol">
           <option value="">— sin columnas —</option>
           <option value="Ciclo" selected>Ciclo</option>
+          <option value="Modalidad">Modalidad</option>
           <option value="Turno">Turno</option>
           <option value="Sede">Sede</option>
           <option value="Periodo">Semestre</option>
@@ -175,6 +190,18 @@
   <div class="tarjeta" id="tjArchivo">
     <header><h2>Archivo de ingresantes</h2></header>
     <div id="estadoArchivo"></div>
+  </div>
+
+  <div class="tarjeta" id="tjModalidadNuevos">
+    <header><h2>Reparto estimado por modalidad</h2><span class="mini">filas sin modalidad declarada</span></header>
+    <div class="nota">
+      Estas filas del archivo no declaran la modalidad, así que el modelo la
+      reparte con la composición histórica de su sede y carrera, contraída por
+      niveles. Declararla en el archivo evita esta estimación y mejora la
+      proyección, porque la continuación del primer ciclo difiere en 29 puntos
+      entre la modalidad presencial y la de a distancia.
+    </div>
+    <div class="envoltura alta"><table id="tbModalidadNuevos"></table></div>
   </div>
 
   <div class="tarjeta" id="tjTurnoNuevos">
@@ -210,6 +237,26 @@
       las celdas con poca evidencia toman prestada información de su padre.
     </p>
     <dl class="par" id="parModelo"></dl>
+  </div>
+
+  <div class="tarjeta" id="tjModalidadModelo">
+    <header><h2>Modalidad de estudios</h2><span class="mini">dimensión del estado</span></header>
+    <p class="txt">
+      La modalidad es la segunda dimensión en importancia tras el ciclo. El
+      99,4 % de los continuadores la conserva de un semestre al siguiente, así
+      que el modelo la trata como atributo fijo —igual que la sede y la
+      carrera— y no necesita matriz de transición. Lo que sí hace es
+      condicionar en ella la continuación, el avance de ciclo y el turno.
+    </p>
+    <div class="leyenda" id="legContMod"></div>
+    <div class="lienzo" id="grContMod"></div>
+    <p class="txt" style="margin-top:10px">
+      La brecha se concentra en el primer ciclo y se cierra a partir del
+      tercero: quien supera el arranque se comporta de forma parecida en las
+      tres modalidades. Un modelo que promediase las tres aplicaría al
+      ingresante a distancia una retención que no le corresponde.
+    </p>
+    <div class="envoltura"><table id="tbModalidad"></table></div>
   </div>
 
   <div class="tarjeta" id="tjMaduracion">

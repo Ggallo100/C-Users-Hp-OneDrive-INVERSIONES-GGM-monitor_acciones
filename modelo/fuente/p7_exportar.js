@@ -29,7 +29,7 @@ function exportarExcel() {
     ['Semestre', 'Ingresantes', 'Continuadores', 'Pesimista', 'Moderado', 'Optimista',
       'IP inferior', 'IP superior', 'Variación vs. anterior'].map(H),
   ];
-  let prev = S.D.stock.filter(x => x[0] === S.D.periodos.length - 1).reduce((s, x) => s + x[5], 0);
+  let prev = S.D.stock.filter(x => x[0] === S.D.periodos.length - 1).reduce((s, x) => s + x[6], 0);
   P.periodos.forEach(T => {
     const c = sumaMapa(P.cen.get(T)), a = sumaMapa(P.alt.get(T)), b = sumaMapa(P.baj.get(T));
     const sd = Math.sqrt(sumaMapa(P.varz.get(T)));
@@ -41,7 +41,7 @@ function exportarExcel() {
   });
 
   /* ---------- 2. Proyección detallada ---------- */
-  const r2 = [['Semestre', 'Sede', 'Carrera', 'Programa nuevo', 'Ciclo', 'Turno',
+  const r2 = [['Semestre', 'Sede', 'Carrera', 'Modalidad', 'Programa nuevo', 'Ciclo', 'Turno',
     'Pesimista', 'Moderado', 'Optimista', 'Desv. típica independiente',
     'IP inferior', 'IP superior'].map(H)];
   P.periodos.forEach(T => {
@@ -53,7 +53,7 @@ function exportarExcel() {
       const d = descomponer(k), nb = nombreDe(d);
       const a = alt.get(k) || 0, b = baj.get(k) || 0, sd = Math.sqrt(vz.get(k) || 0);
       const hw = P.z * Math.sqrt(Math.pow((a - b) / 2 / P.z, 2) + sd * sd);
-      r2.push([rotuloPeriodo(T), nb.Sede, nb.Carrera,
+      r2.push([rotuloPeriodo(T), nb.Sede, nb.Carrera, nb.Modalidad,
         S.carrerasNuevas.has(nb.Carrera) ? 'Sí' : 'No', nb.Ciclo, nb.Turno,
       N0(b), N0(c), N0(a), N2(sd), N0(Math.max(c - hw, 0)), N0(c + hw)]);
     });
@@ -90,6 +90,11 @@ function exportarExcel() {
     ['Semestre', 'Ciclo']);
   agregado('Por semestre y turno', (d, T) => rotuloPeriodo(T) + SEP + S.D.turnos[d.it],
     ['Semestre', 'Turno']);
+  agregado('Por semestre y modalidad', (d, T) => rotuloPeriodo(T) + SEP + S.D.modalidades[d.im],
+    ['Semestre', 'Modalidad']);
+  agregado('Por semestre, modalidad y ciclo',
+    (d, T) => rotuloPeriodo(T) + SEP + S.D.modalidades[d.im] + SEP + String(d.ciclo).padStart(2, '0'),
+    ['Semestre', 'Modalidad', 'Ciclo']);
 
   /* ---------- 4. Ingresantes y reparto de turno ---------- */
   const r4 = [
@@ -99,7 +104,7 @@ function exportarExcel() {
     ['El archivo de entrada no declara el turno. El reparto se estima con una composición ' +
       'multinomial contraída por niveles; la columna «Nivel usado» indica hasta qué nivel llegó la evidencia.'],
     [],
-    ['Semestre', 'Sede', 'Carrera', 'Programa nuevo', 'Ciclo', 'Nuevos']
+    ['Semestre', 'Sede', 'Carrera', 'Modalidad', 'Programa nuevo', 'Ciclo', 'Nuevos']
       .concat(S.D.turnos.map(t => 'Turno ' + t))
       .concat(S.D.turnos.map(t => '% ' + t))
       .concat(['Nivel usado']).map(H),
@@ -109,9 +114,9 @@ function exportarExcel() {
     if (!m) return;
     Array.from(m.keys()).sort().forEach(k => {
       const cant = m.get(k);
-      const [is, ic, ci] = k.split('|').map(Number);
-      const [mz, nef, nivel] = mezclaNuevos(S.E, is, ic, ci, T % 100);
-      r4.push([rotuloPeriodo(T), S.sedes[is], S.carreras[ic],
+      const [is, ic, im, ci] = k.split('|').map(Number);
+      const [mz, nef, nivel] = mezclaNuevos(S.E, is, ic, im, ci, T % 100);
+      r4.push([rotuloPeriodo(T), S.sedes[is], S.carreras[ic], S.D.modalidades[im],
         S.carrerasNuevas.has(S.carreras[ic]) ? 'Sí' : 'No', ci, N0(cant)]
         .concat(mz.map(p => N0(cant * p)))
         .concat(mz.map(p => PC(p)))
@@ -139,25 +144,58 @@ function exportarExcel() {
       Array.from({ length: S.D.lagMax }, (_, i) => PC(a[S.E.LAG + i] / Math.max(a[i], 1e-9)))));
   }
   r5.push([]);
-  r5.push([TT('Continuación por carrera, ciclo y paridad (rezago 1, contraída)')]);
-  r5.push(['Carrera', 'Ciclo', 'Semestre', 'Observaciones ponderadas',
-    'Tasa cruda', 'Tasa contraída'].map(H));
-  const vistos = new Set();
-  S.D.carreras.forEach((nom, ic) => {
-    for (let ci = 1; ci <= S.D.cicloMax; ci++) {
+  r5.push([TT('Continuación por modalidad y ciclo (rezago 1)')]);
+  r5.push(['La modalidad es la segunda dimensión en importancia tras el ciclo. La brecha se ' +
+    'concentra en el primer ciclo y se cierra a partir del tercero.']);
+  r5.push(['Ciclo'].concat(S.D.modalidades).concat(
+    S.D.modalidades.map(m => 'n ' + m)).map(H));
+  for (let ci = 1; ci <= S.D.cicloMax; ci++) {
+    const tasas = [], enes = [];
+    let hay = false;
+    S.D.modalidades.forEach((_, im) => {
+      let n = 0, k = 0;
       for (const pa of [1, 2]) {
-        const a = S.E.porCarrera.get(ic + '|' + ci + '|' + pa);
-        if (!a || a[0] <= 0) continue;
-        const key = ic + '|' + ci + '|' + pa;
-        if (vistos.has(key)) continue;
-        vistos.add(key);
-        let mejor = null;
-        S.D.sedes.forEach((_, is2) => { if (S.E.celda.get(is2 + '|' + ic + '|' + ci + '|' + pa)) mejor = is2; });
-        const [q] = tasaQ(S.E, mejor == null ? 0 : mejor, ic, ci, pa, 1);
-        r5.push([nom, ci, pa === 1 ? 'I' : 'II', N0(a[0]),
-        PC(a[S.E.LAG] / Math.max(a[0], 1e-9)), PC(q)]);
+        const a = S.E.porModa.get(im + '|' + ci + '|' + pa);
+        if (a) { n += a[0]; k += a[S.E.LAG]; }
       }
+      if (n > 0) { hay = true; tasas.push(PC(k / n)); enes.push(N0(n)); }
+      else { tasas.push(''); enes.push(''); }
+    });
+    if (hay) r5.push([ci].concat(tasas).concat(enes));
+  }
+  r5.push([]);
+  r5.push([TT('Avance de ciclo por modalidad')]);
+  r5.push(['Modalidad'].concat(S.D.deltas.map(d => (d > 0 ? '+' : '') + d)).map(H));
+  S.D.modalidades.forEach((nom, im) => {
+    const acc = new Array(S.E.ND).fill(0);
+    for (let ci = 1; ci <= S.D.cicloMax; ci++) {
+      const a = S.E.avModa.get(im + '|' + ci);
+      if (a) for (let j = 0; j < S.E.ND; j++) acc[j] += a[j];
     }
+    const sa = acc.reduce((x, y) => x + y, 0);
+    if (sa > 0) r5.push([nom].concat(acc.map(v => PC(v / sa))));
+  });
+
+  r5.push([]);
+  r5.push([TT('Continuación por carrera, ciclo y paridad (rezago 1, contraída)')]);
+  r5.push(['Carrera', 'Modalidad', 'Ciclo', 'Semestre', 'Observaciones ponderadas',
+    'Tasa cruda', 'Tasa contraída'].map(H));
+  S.D.carreras.forEach((nom, ic) => {
+    S.D.modalidades.forEach((md, im) => {
+      for (let ci = 1; ci <= S.D.cicloMax; ci++) {
+        for (const pa of [1, 2]) {
+          const a = S.E.porCarrera.get(ic + '|' + im + '|' + ci + '|' + pa);
+          if (!a || a[0] <= 0) continue;
+          let mejor = null;
+          S.D.sedes.forEach((_, is2) => {
+            if (S.E.celda.get(is2 + '|' + ic + '|' + im + '|' + ci + '|' + pa)) mejor = is2;
+          });
+          const [q] = tasaQ(S.E, mejor == null ? 0 : mejor, ic, im, ci, pa, 1);
+          r5.push([nom, md, ci, pa === 1 ? 'I' : 'II', N0(a[0]),
+          PC(a[S.E.LAG] / Math.max(a[0], 1e-9)), PC(q)]);
+        }
+      }
+    });
   });
   r5.push([]);
   r5.push([TT('Avance de ciclo de los continuadores (global)')]);
@@ -169,15 +207,16 @@ function exportarExcel() {
       d < 0 ? 'Retrocede de ciclo' : 'Avanza ' + d + ' ciclos']));
   r5.push([]);
   r5.push([TT('Transición de turno por sede')]);
-  r5.push(['Sede', 'Turno de origen'].concat(S.D.turnos.map(t => '→ ' + t))
+  r5.push(['Sede', 'Modalidad', 'Turno de origen'].concat(S.D.turnos.map(t => '→ ' + t))
     .concat(['Observaciones ponderadas']).map(H));
-  S.D.sedes.forEach((sd, is) => S.D.turnos.forEach((t0, it) => {
-    const a = S.E.tuSede.get(is + '|' + it);
-    if (!a) return;
-    const s = a.reduce((x, y) => x + y, 0);
-    if (s <= 0) return;
-    r5.push([sd, t0].concat(a.map(v => PC(v / s))).concat([N0(s)]));
-  }));
+  S.D.sedes.forEach((sd, is) => S.D.modalidades.forEach((md, im) =>
+    S.D.turnos.forEach((t0, it) => {
+      const a = S.E.tuModa.get(is + '|' + im + '|' + it);
+      if (!a) return;
+      const s = a.reduce((x, y) => x + y, 0);
+      if (s <= 0.5) return;
+      r5.push([sd, md, t0].concat(a.map(v => PC(v / s))).concat([N0(s)]));
+    })));
   r5.push([]);
   r5.push([TT('Maduración de sede · ciclo máximo ofertable')]);
   r5.push(['Una sede recién abierta despliega su plan semestre a semestre: en el de apertura ' +
@@ -278,13 +317,27 @@ function exportarExcel() {
     ['k = p(1−p)/σ²_entre − 1. Así una celda con pocas observaciones toma prestada información'],
     ['de su nivel superior en lugar de producir una tasa inestable.'],
     [],
-    [H('5. Programas nuevos')],
+    [H('5. Modalidad de estudios')],
+    ['La modalidad (Presencial, Semi Presencial y A distancia) es la segunda dimensión en'],
+    ['importancia tras el ciclo. El 99,4 % de los continuadores la conserva de un semestre al'],
+    ['siguiente, así que el modelo la trata como atributo fijo —igual que la sede y la carrera—'],
+    ['y no necesita matriz de transición. Lo que sí hace es condicionar en ella la continuación,'],
+    ['el avance de ciclo y el turno.'],
+    ['La diferencia es grande y se concentra en el arranque: en el primer ciclo la continuación al'],
+    ['semestre siguiente va del 42 % a distancia al 71 % presencial, con la semipresencial en medio.'],
+    ['A partir del tercer ciclo las tres convergen. Un modelo que las promediara aplicaría al'],
+    ['ingresante a distancia una retención que no le corresponde, y el error crecería a medida que'],
+    ['esa modalidad gana peso: ha pasado del 4,8 % al 19,6 % de la matrícula en cuatro años.'],
+    ['El archivo de entrada puede declarar la modalidad; si no lo hace, el modelo la reparte con'],
+    ['la composición histórica de la sede y la carrera, contraída por niveles.'],
+    [],
+    [H('6. Programas nuevos')],
     ['Una carrera sin historia en la base no encuentra evidencia en los niveles finos de la'],
     ['escalera y se queda en el nivel agregado que sí la tiene: el comportamiento de continuación'],
     ['de su ciclo y el reparto de turno de su sede. Es el mismo mecanismo de contracción, sin'],
     ['reglas especiales. Si el plan no dura ' + S.D.planDefecto + ' ciclos, se declara en la columna CiclosPlan.'],
     [],
-    [H('6. Maduración de sede')],
+    [H('7. Maduración de sede')],
     ['Una sede que abre no puede tener estudiantes en cualquier ciclo: despliega su plan de'],
     ['estudios semestre a semestre. En el semestre de apertura sólo existe el ciclo 1, un'],
     ['semestre después el 2, y así sucesivamente. El modelo aplica ese tope al avance de los'],
@@ -295,12 +348,12 @@ function exportarExcel() {
     ['registro es anterior a la ventana de datos y no recibe tope. Las sedes que aparecen por'],
     ['primera vez en el archivo de ingresantes se tratan como aperturas en ese semestre.'],
     [],
-    [H('7. Reparto de los ingresantes por turno')],
+    [H('8. Reparto de los ingresantes por turno')],
     ['El archivo de entrada no declara el turno. Se estima con una composición multinomial'],
     ['contraída por niveles y ponderada por recencia, porque la mezcla de turno está en deriva'],
     ['pronunciada en el histórico. La estimación es determinista y reproducible.'],
     [],
-    [H('8. Escenarios frente a intervalo de predicción')],
+    [H('9. Escenarios frente a intervalo de predicción')],
     ['Los tres ESCENARIOS aplican un desplazamiento sistémico común en escala logit a la tasa'],
     ['de continuación, de ±z·σ. Son estados del mundo coherentes: el total de cada escenario'],
     ['es exactamente la suma de sus celdas, así que sirven para planificar capacidad.'],
@@ -308,13 +361,13 @@ function exportarExcel() {
     ['error de parámetro y varianza propagada). No es aditivo entre celdas, pero es el que'],
     ['responde a la pregunta de dónde caerá el dato observado.'],
     [],
-    [H('9. Validación')],
+    [H('10. Validación')],
     ['Backtesting de origen móvil: se reestima con la información disponible hasta cada semestre'],
     ['de corte y se proyecta el resto, comparando con lo efectivamente observado. Los resultados'],
     ['están en la hoja «Validación». La ponderación de recencia λ se eligió por este mismo'],
     ['procedimiento, no a juicio.'],
     [],
-    [H('10. Advertencias')],
+    [H('11. Advertencias')],
     ['· La proyección es condicional al archivo de ingresantes: no prevé la admisión.'],
     ['· La precisión relativa se degrada al desagregar; en celdas de pocos estudiantes conviene'],
     ['  leer el intervalo de predicción, no sólo el punto.'],
@@ -324,10 +377,10 @@ function exportarExcel() {
 
   const blob = construirXlsx([
     { nombre: 'Resumen', filas: r1, anchos: [26, 14, 14, 13, 13, 13, 13, 13, 14] },
-    { nombre: 'Proyección detallada', filas: r2, anchos: [11, 13, 50, 9, 7, 9, 11, 11, 11, 13, 11, 11], inmovilizar: 1 },
+    { nombre: 'Proyección detallada', filas: r2, anchos: [11, 13, 50, 17, 9, 7, 9, 11, 11, 11, 13, 11, 11], inmovilizar: 1 },
     { nombre: 'Agregados', filas: r3, anchos: [13, 50, 12, 12, 12] },
-    { nombre: 'Ingresantes', filas: r4, anchos: [11, 13, 50, 9, 7, 9].concat(S.D.turnos.map(() => 11)).concat(S.D.turnos.map(() => 10)).concat([22]) },
-    { nombre: 'Parámetros', filas: r5, anchos: [50, 12, 12, 12, 12, 14] },
+    { nombre: 'Ingresantes', filas: r4, anchos: [11, 13, 50, 17, 9, 7, 9].concat(S.D.turnos.map(() => 11)).concat(S.D.turnos.map(() => 10)).concat([30]) },
+    { nombre: 'Parámetros', filas: r5, anchos: [50, 17, 12, 12, 16, 12, 14] },
     { nombre: 'Validación', filas: r6, anchos: [34, 14, 14, 14, 18, 14] },
     { nombre: 'Metodología', filas: r7, anchos: [104] },
   ]);

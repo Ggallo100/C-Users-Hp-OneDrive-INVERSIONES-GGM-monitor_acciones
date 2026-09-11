@@ -118,7 +118,8 @@ def pesos(b, tmax, lam):
 
 def tabla_continuacion(b, nper, lam):
     """
-    Conteos ponderados de continuación por (sede, carrera, ciclo, par) y rezago.
+    Conteos ponderados de continuación por (sede, carrera, modalidad, ciclo,
+    par) y rezago.
 
     Censura: un origen en t entra en el conjunto de riesgo del rezago L sólo si
     t+L cae dentro de la ventana observada; sin ese control los rezagos largos
@@ -129,11 +130,12 @@ def tabla_continuacion(b, nper, lam):
     rz = b["rezago"].values
     sede = b["Sede"].values
     carr = b["Carrera"].values
+    moda = b["Modalidad_estudios"].values
     cic = b["Ciclo"].values.astype(int)
     par = b["par"].values.astype(int)
     filas = {}
     for i in range(len(b)):
-        f = filas.setdefault((sede[i], carr[i], cic[i], par[i]),
+        f = filas.setdefault((sede[i], carr[i], moda[i], cic[i], par[i]),
                              [np.zeros(LAG_MAX), np.zeros(LAG_MAX)])
         for L in range(1, LAG_MAX + 1):
             if tt[i] + L <= nper - 1:
@@ -142,7 +144,7 @@ def tabla_continuacion(b, nper, lam):
             L = int(rz[i])
             if 1 <= L <= LAG_MAX:
                 f[1][L - 1] += w[i]
-    return [{"sede": k[0], "carrera": k[1], "ciclo": k[2], "par": k[3],
+    return [{"sede": k[0], "carrera": k[1], "moda": k[2], "ciclo": k[3], "par": k[4],
              "n": v[0], "k": v[1]} for k, v in filas.items()]
 
 
@@ -150,22 +152,36 @@ def tabla_avance(b, nper, lam):
     r = b[b["tSig"].notna()].copy()
     r["w"] = pesos(r, nper - 1, lam)
     r["delta"] = (r["cicloSig"] - r["Ciclo"]).map(clasifica_delta)
-    return (r.groupby(["Carrera", "Ciclo", "delta"])["w"].sum()
+    return (r.groupby(["Carrera", "Modalidad_estudios", "Ciclo", "delta"])["w"].sum()
             .unstack("delta", fill_value=0.0).reindex(columns=DELTAS, fill_value=0.0))
 
 
 def tabla_turno(b, turnos, nper, lam):
     r = b[b["tSig"].notna()].copy()
     r["w"] = pesos(r, nper - 1, lam)
-    return (r.groupby(["Sede", "Ciclo", "Turno", "turnoSig"])["w"].sum()
+    return (r.groupby(["Sede", "Modalidad_estudios", "Ciclo", "Turno", "turnoSig"])["w"].sum()
             .unstack("turnoSig", fill_value=0.0).reindex(columns=turnos, fill_value=0.0))
 
 
 def tabla_nuevos_turno(b, turnos, nper, lam_n):
     n = b[b["esNuevo"] == 1].copy()
     n["w"] = pesos(n, nper - 1, lam_n)
-    return (n.groupby(["Sede", "Carrera", "Ciclo", "par", "Turno"])["w"].sum()
+    return (n.groupby(["Sede", "Carrera", "Modalidad_estudios", "Ciclo", "par", "Turno"])["w"].sum()
             .unstack("Turno", fill_value=0.0).reindex(columns=turnos, fill_value=0.0))
+
+
+def tabla_nuevos_modalidad(b, modalidades, nper, lam_n):
+    """
+    P(modalidad | sede, carrera, ciclo, par) sobre los ingresantes. Sólo se usa
+    cuando el archivo de entrada no declara la modalidad. La mezcla oscila mucho
+    con la paridad del semestre —en el segundo semestre la modalidad a distancia
+    pesa bastante más—, por eso la paridad entra como condicionante.
+    """
+    n = b[b["esNuevo"] == 1].copy()
+    n["w"] = pesos(n, nper - 1, lam_n)
+    return (n.groupby(["Sede", "Carrera", "Ciclo", "par", "Modalidad_estudios"])["w"].sum()
+            .unstack("Modalidad_estudios", fill_value=0.0)
+            .reindex(columns=modalidades, fill_value=0.0))
 
 
 # =============================================================================
@@ -185,10 +201,16 @@ def varianza_proceso(b, nper):
                     NO se cancela al agregar: es el motor de los escenarios.
 
     Modelo auxiliar: GLM binomial con enlace logit,
-        logit P(continúa) = mu + a_ciclo + g_periodo
+        logit P(continúa) = mu + a_ciclo + b_modalidad + g_periodo
     La paridad queda anidada en el periodo (incluirla aparte daría un diseño de
     rango deficiente), así que se extrae después proyectando los efectos de
     periodo sobre la paridad; el residuo es el choque estocástico.
+
+    La modalidad entra como control porque su composición está en fuerte deriva
+    —la modalidad a distancia pasa del 4,8 % al 19,6 % de la matrícula— y su
+    continuación es muy distinta. Sin controlarla, parte de ese cambio de
+    composición se contabilizaría como choque de periodo y ensancharía los
+    escenarios con variación que en realidad es predecible.
     """
     import statsmodels.api as sm
     import statsmodels.formula.api as smf
@@ -197,11 +219,13 @@ def varianza_proceso(b, nper):
     r = b[b["t"] < nper - 1].copy()
     r["cont"] = (r["rezago"] == 1).fillna(False).astype(int)
     r["ciclo_f"] = r["Ciclo"].astype(str)
+    r["moda_f"] = r["Modalidad_estudios"].astype(str)
     r["periodo_f"] = r["Periodo_real"].astype(str)
 
-    mod = smf.glm("cont ~ C(ciclo_f) + C(periodo_f)", data=r,
+    mod = smf.glm("cont ~ C(ciclo_f) + C(moda_f) + C(periodo_f)", data=r,
                   family=sm.families.Binomial()).fit()
-    base = smf.glm("cont ~ C(ciclo_f)", data=r, family=sm.families.Binomial()).fit()
+    base = smf.glm("cont ~ C(ciclo_f) + C(moda_f)", data=r,
+                   family=sm.families.Binomial()).fit()
 
     per_o = sorted(r["Periodo_real"].unique())
     coef = mod.params
@@ -263,10 +287,17 @@ def construir_parametros(b, per, hasta=None, lam=0.50, lam_n=0.30):
     turnos = sorted(bb["Turno"].unique())
     sedes = sorted(bb["Sede"].unique())
     carreras = sorted(bb["Carrera"].unique())
+    modalidades = sorted(bb["Modalidad_estudios"].unique())
     ciclo_max = int(bb["Ciclo"].max())
     R4 = lambda v: [round(float(x), 4) for x in v]
 
     # --- continuación ------------------------------------------------------
+    # Escalera de contracción, del nivel más agregado al más fino:
+    #   global -> ciclo -> ciclo·par -> modalidad·ciclo·par
+    #          -> carrera·modalidad·ciclo·par -> celda(sede,...)
+    # La modalidad entra justo después de la estructura por ciclo porque es el
+    # segundo factor en importancia: en el ciclo 1 la continuación va del 42 %
+    # a distancia al 71 % presencial.
     tab = tabla_continuacion(bb, nper, lam)
     dfc = pd.DataFrame(tab)
     for L in range(LAG_MAX):
@@ -274,7 +305,8 @@ def construir_parametros(b, per, hasta=None, lam=0.50, lam_n=0.30):
         dfc[f"k{L}"] = dfc["k"].str[L]
     cols = [f"n{L}" for L in range(LAG_MAX)] + [f"k{L}" for L in range(LAG_MAX)]
     niv = {
-        "carrera": dfc.groupby(["carrera", "ciclo", "par"])[cols].sum(),
+        "carrera": dfc.groupby(["carrera", "moda", "ciclo", "par"])[cols].sum(),
+        "moda": dfc.groupby(["moda", "ciclo", "par"])[cols].sum(),
         "ciclopar": dfc.groupby(["ciclo", "par"])[cols].sum(),
         "ciclo": dfc.groupby(["ciclo"])[cols].sum(),
     }
@@ -288,35 +320,51 @@ def construir_parametros(b, per, hasta=None, lam=0.50, lam_n=0.30):
                        "k": R4([d[f"k{L}"][key] for L in range(LAG_MAX)])}
         return out
 
-    cont_celda = {f"{r['sede']}|{r['carrera']}|{r['ciclo']}|{r['par']}":
+    cont_celda = {f"{r['sede']}|{r['carrera']}|{r['moda']}|{r['ciclo']}|{r['par']}":
                   {"n": R4(r["n"]), "k": R4(r["k"])} for r in tab}
-    ks = {"celda": [], "carrera": [], "ciclopar": [], "ciclo": []}
+    ks = {"celda": [], "carrera": [], "moda": [], "ciclopar": [], "ciclo": []}
     for L in range(LAG_MAX):
         ks["celda"].append(k_betabinom(dfc[f"k{L}"], dfc[f"n{L}"]))
-        ks["carrera"].append(k_betabinom(niv["carrera"][f"k{L}"], niv["carrera"][f"n{L}"]))
-        ks["ciclopar"].append(k_betabinom(niv["ciclopar"][f"k{L}"], niv["ciclopar"][f"n{L}"]))
-        ks["ciclo"].append(k_betabinom(niv["ciclo"][f"k{L}"], niv["ciclo"][f"n{L}"]))
+        for nom in ("carrera", "moda", "ciclopar", "ciclo"):
+            ks[nom].append(k_betabinom(niv[nom][f"k{L}"], niv[nom][f"n{L}"]))
 
     # --- avance de ciclo ---------------------------------------------------
+    # celda(carrera,modalidad,ciclo) -> modalidad·ciclo -> ciclo -> global
     av = tabla_avance(bb, nper, lam)
-    av_celda = {f"{c}|{ci}": R4(av.loc[(c, ci)].values) for (c, ci) in av.index}
+    av_celda = {f"{c}|{m}|{ci}": R4(av.loc[(c, m, ci)].values) for (c, m, ci) in av.index}
+    avm = av.groupby(level=["Modalidad_estudios", "Ciclo"]).sum()
+    av_moda = {f"{m}|{ci}": R4(avm.loc[(m, ci)].values) for (m, ci) in avm.index}
     avc = av.groupby(level="Ciclo").sum()
     av_ciclo = {str(ci): R4(avc.loc[ci].values) for ci in avc.index}
 
     # --- turno -------------------------------------------------------------
+    # celda(sede,modalidad,ciclo,turno) -> sede·modalidad·turno -> sede·turno
     tu = tabla_turno(bb, turnos, nper, lam)
-    tu_celda = {f"{s}|{ci}|{t}": R4(tu.loc[(s, ci, t)].values) for (s, ci, t) in tu.index}
+    tu_celda = {f"{s}|{m}|{ci}|{t}": R4(tu.loc[(s, m, ci, t)].values)
+                for (s, m, ci, t) in tu.index}
+    tum = tu.groupby(level=["Sede", "Modalidad_estudios", "Turno"]).sum()
+    tu_moda = {f"{s}|{m}|{t}": R4(tum.loc[(s, m, t)].values) for (s, m, t) in tum.index}
     tus = tu.groupby(level=["Sede", "Turno"]).sum()
     tu_sede = {f"{s}|{t}": R4(tus.loc[(s, t)].values) for (s, t) in tus.index}
 
     # --- mezcla de turno de ingresantes ------------------------------------
     nt = tabla_nuevos_turno(bb, turnos, nper, lam_n)
-    nt_celda = {f"{s}|{c}|{ci}|{pa}": R4(nt.loc[(s, c, ci, pa)].values)
-                for (s, c, ci, pa) in nt.index}
-    g1 = nt.groupby(level=["Sede", "Carrera", "par"]).sum()
-    g2 = nt.groupby(level=["Sede", "Carrera"]).sum()
-    g3 = nt.groupby(level=["Sede", "par"]).sum()
-    g4 = nt.groupby(level=["Sede"]).sum()
+    nt_celda = {f"{s}|{c}|{m}|{ci}|{pa}": R4(nt.loc[(s, c, m, ci, pa)].values)
+                for (s, c, m, ci, pa) in nt.index}
+    g1 = nt.groupby(level=["Sede", "Carrera", "Modalidad_estudios", "par"]).sum()
+    g2 = nt.groupby(level=["Sede", "Carrera", "Modalidad_estudios"]).sum()
+    g3 = nt.groupby(level=["Sede", "Modalidad_estudios", "par"]).sum()
+    g4 = nt.groupby(level=["Sede", "Modalidad_estudios"]).sum()
+    g5 = nt.groupby(level=["Sede"]).sum()
+
+    # --- mezcla de modalidad de ingresantes --------------------------------
+    nm = tabla_nuevos_modalidad(bb, modalidades, nper, lam_n)
+    nm_celda = {f"{s}|{c}|{ci}|{pa}": R4(nm.loc[(s, c, ci, pa)].values)
+                for (s, c, ci, pa) in nm.index}
+    m1 = nm.groupby(level=["Sede", "Carrera", "par"]).sum()
+    m2 = nm.groupby(level=["Sede", "Carrera"]).sum()
+    m3 = nm.groupby(level=["Sede", "par"]).sum()
+    m4 = nm.groupby(level=["Sede"]).sum()
 
     # --- longitud de plan --------------------------------------------------
     # Un ciclo con continuación alta implica que el plan sigue más allá; el
@@ -336,8 +384,7 @@ def construir_parametros(b, per, hasta=None, lam=0.50, lam_n=0.30):
                 tope = max(10, max(altos) + 1)
         plan[c] = int(min(tope, ciclo_max))
 
-    # Apertura de sede: el ciclo máximo de su primer semestre observado revela
-    # si la sede arrancó en la ventana de datos o es anterior a ella.
+    # --- apertura de sede --------------------------------------------------
     apertura = {}
     for sede in sedes:
         sub = bb[bb["Sede"] == sede]
@@ -348,29 +395,43 @@ def construir_parametros(b, per, hasta=None, lam=0.50, lam_n=0.30):
 
     return {
         "periodos": per_u, "turnos": turnos, "sedes": sedes, "carreras": carreras,
+        "modalidades": modalidades,
         "cicloMax": ciclo_max, "planCiclos": plan, "planDefecto": 10,
         "sedeApertura": apertura,
         "deltas": DELTAS, "lagMax": LAG_MAX, "lambda": lam, "lambdaNuevos": lam_n,
         "cont_celda": cont_celda,
         "cont_carrera": a_dict(niv["carrera"]),
+        "cont_moda": a_dict(niv["moda"]),
         "cont_ciclopar": a_dict(niv["ciclopar"]),
         "cont_ciclo": a_dict(niv["ciclo"]),
         "cont_global": [float(glob[f"k{L}"]) / max(float(glob[f"n{L}"]), 1e-9)
                         for L in range(LAG_MAX)],
-        "k_celda": ks["celda"], "k_carrera": ks["carrera"],
+        "k_celda": ks["celda"], "k_carrera": ks["carrera"], "k_moda": ks["moda"],
         "k_ciclopar": ks["ciclopar"], "k_ciclo": ks["ciclo"],
-        "av_celda": av_celda, "av_ciclo": av_ciclo, "av_global": R4(av.sum().values),
+        "av_celda": av_celda, "av_moda": av_moda, "av_ciclo": av_ciclo,
+        "av_global": R4(av.sum().values),
         "k_avance": k_dirichlet(np.array(list(av_celda.values()), float)),
-        "tu_celda": tu_celda, "tu_sede": tu_sede,
+        "tu_celda": tu_celda, "tu_moda": tu_moda, "tu_sede": tu_sede,
         "k_turno": k_dirichlet(np.array(list(tu_celda.values()), float)),
         "nt_celda": nt_celda,
-        "nt_carrera_par": {f"{s}|{c}|{pa}": R4(g1.loc[(s, c, pa)].values)
-                           for (s, c, pa) in g1.index},
-        "nt_carrera": {f"{s}|{c}": R4(g2.loc[(s, c)].values) for (s, c) in g2.index},
-        "nt_sede_par": {f"{s}|{pa}": R4(g3.loc[(s, pa)].values) for (s, pa) in g3.index},
-        "nt_sede": {f"{s}": R4(g4.loc[s].values) for s in g4.index},
+        "nt_carrera_moda_par": {f"{s}|{c}|{m}|{pa}": R4(g1.loc[(s, c, m, pa)].values)
+                                for (s, c, m, pa) in g1.index},
+        "nt_carrera_moda": {f"{s}|{c}|{m}": R4(g2.loc[(s, c, m)].values)
+                            for (s, c, m) in g2.index},
+        "nt_sede_moda_par": {f"{s}|{m}|{pa}": R4(g3.loc[(s, m, pa)].values)
+                             for (s, m, pa) in g3.index},
+        "nt_sede_moda": {f"{s}|{m}": R4(g4.loc[(s, m)].values) for (s, m) in g4.index},
+        "nt_sede": {f"{s}": R4(g5.loc[s].values) for s in g5.index},
         "nt_global": R4(nt.sum().values),
         "k_nuevos": k_dirichlet(np.array(list(nt_celda.values()), float)),
+        "nm_celda": nm_celda,
+        "nm_carrera_par": {f"{s}|{c}|{pa}": R4(m1.loc[(s, c, pa)].values)
+                           for (s, c, pa) in m1.index},
+        "nm_carrera": {f"{s}|{c}": R4(m2.loc[(s, c)].values) for (s, c) in m2.index},
+        "nm_sede_par": {f"{s}|{pa}": R4(m3.loc[(s, pa)].values) for (s, pa) in m3.index},
+        "nm_sede": {f"{s}": R4(m4.loc[s].values) for s in m4.index},
+        "nm_global": R4(nm.sum().values),
+        "k_modalidad": k_dirichlet(np.array(list(nm_celda.values()), float)),
     }
 
 
@@ -403,13 +464,14 @@ class Modelo:
     def __init__(self, par, factor_k=1.0):
         self.p = par
         self.turnos = par["turnos"]
+        self.modalidades = par.get("modalidades", [])
         self.fk = factor_k
         self._cq = {}
 
     # --- parámetros contraídos --------------------------------------------
-    def q(self, sede, carrera, ciclo, parid, L):
+    def q(self, sede, carrera, moda, ciclo, parid, L):
         """Tasa de continuación contraída y su tamaño muestral efectivo."""
-        ck = (sede, carrera, ciclo, parid, L)
+        ck = (sede, carrera, moda, ciclo, parid, L)
         if ck in self._cq:
             return self._cq[ck]
         p = self.p
@@ -418,8 +480,9 @@ class Modelo:
         cadena = [
             (p["cont_ciclo"].get(cl), p["k_ciclo"][i] * self.fk),
             (p["cont_ciclopar"].get(f"{cl}|{parid}"), p["k_ciclopar"][i] * self.fk),
-            (p["cont_carrera"].get(f"{carrera}|{cl}|{parid}"), p["k_carrera"][i] * self.fk),
-            (p["cont_celda"].get(f"{sede}|{carrera}|{cl}|{parid}"), p["k_celda"][i] * self.fk),
+            (p["cont_moda"].get(f"{moda}|{cl}|{parid}"), p["k_moda"][i] * self.fk),
+            (p["cont_carrera"].get(f"{carrera}|{moda}|{cl}|{parid}"), p["k_carrera"][i] * self.fk),
+            (p["cont_celda"].get(f"{sede}|{carrera}|{moda}|{cl}|{parid}"), p["k_celda"][i] * self.fk),
         ]
         est = p["cont_global"][i]
         nef = 0.0
@@ -447,6 +510,23 @@ class Modelo:
         s = v.sum()
         return (v / s if s > 0 else pad), c.sum() + k
 
+    def _cascada(self, cadena, raiz, k):
+        """Contracción en cascada por una lista de niveles, del más agregado
+        al más fino. Se detiene en el último nivel que tenga evidencia."""
+        v = np.asarray(raiz, float)
+        v = v / max(v.sum(), 1e-9)
+        nef = k
+        nivel_usado = "global"
+        for nombre, celda in cadena:
+            if celda is None:
+                continue
+            c = np.asarray(celda, float)
+            if c.sum() <= 0:
+                continue
+            v, nef = self._comp(c, v, k)
+            nivel_usado = nombre
+        return v, nef, nivel_usado
+
     def tope_sede(self, sede, T):
         """
         Ciclo máximo que una sede puede ofrecer en el semestre T.
@@ -454,11 +534,7 @@ class Modelo:
         Una sede recién abierta despliega su plan de estudios semestre a
         semestre: en el de apertura sólo existe el ciclo 1, un semestre después
         el 2, y así sucesivamente. Sin este tope la proyección colocaría
-        estudiantes en ciclos que la sede todavía no imparte, porque la matriz
-        de avance permite saltos de +2 y +3 y el archivo de ingresantes puede
-        declarar traslados a ciclos superiores.
-
-        Las sedes consolidadas devuelven un tope inoperante.
+        estudiantes en ciclos que la sede todavía no imparte.
         """
         ap = self.p.get("sedeApertura", {}).get(sede)
         if not ap or not ap.get("enMaduracion"):
@@ -467,66 +543,71 @@ class Modelo:
         # aún no ofrece ningún ciclo.
         return max(0, ap["cicloBase"] + (indice_periodo(T) - indice_periodo(ap["inicio"])))
 
-    def avance(self, carrera, ciclo):
+    def avance(self, carrera, moda, ciclo):
         p = self.p
         cl = str(min(ciclo, p["cicloMax"]))
-        pad = p["av_ciclo"].get(cl, p["av_global"])
-        return self._comp(p["av_celda"].get(f"{carrera}|{cl}"), pad, p["k_avance"] * self.fk)
+        raiz = p["av_ciclo"].get(cl, p["av_global"])
+        v, nef, _ = self._cascada([
+            ("modalidad", p["av_moda"].get(f"{moda}|{cl}")),
+            ("celda", p["av_celda"].get(f"{carrera}|{moda}|{cl}")),
+        ], raiz, p["k_avance"] * self.fk)
+        return v, nef
 
-    def turno_trans(self, sede, ciclo, turno):
+    def turno_trans(self, sede, moda, ciclo, turno):
         p = self.p
         cl = str(min(ciclo, p["cicloMax"]))
-        pad = p["tu_sede"].get(f"{sede}|{turno}")
-        if pad is None:
+        raiz = p["tu_sede"].get(f"{sede}|{turno}")
+        if raiz is None:
             v = np.zeros(len(self.turnos))
             v[self.turnos.index(turno)] = 1.0
             return v, 1e6
-        return self._comp(p["tu_celda"].get(f"{sede}|{cl}|{turno}"), pad,
-                          p["k_turno"] * self.fk)
+        v, nef, _ = self._cascada([
+            ("sede·modalidad", p["tu_moda"].get(f"{sede}|{moda}|{turno}")),
+            ("celda", p["tu_celda"].get(f"{sede}|{moda}|{cl}|{turno}")),
+        ], raiz, p["k_turno"] * self.fk)
+        return v, nef
 
-    def mezcla_nuevos(self, sede, carrera, ciclo, parid):
+    def mezcla_nuevos(self, sede, carrera, moda, ciclo, parid):
         """
-        Estimación matemática del reparto por turno de los ingresantes.
-        Escalera de contracción: global -> sede -> (sede,par) -> (sede,carrera)
-        -> (sede,carrera,par) -> celda. Una carrera NUEVA, sin historia propia,
-        se queda en el nivel de sede, que sí la tiene.
+        Reparto estimado de los ingresantes por turno. La modalidad entra pronto
+        en la cascada porque casi lo determina: a distancia es noche en un 90 %.
         """
         p = self.p
         cl = str(min(ciclo, p["cicloMax"]))
         k = p["k_nuevos"] * self.fk
-        cadena = [
-            p["nt_sede"].get(sede),
-            p["nt_sede_par"].get(f"{sede}|{parid}"),
-            p["nt_carrera"].get(f"{sede}|{carrera}"),
-            p["nt_carrera_par"].get(f"{sede}|{carrera}|{parid}"),
-            p["nt_celda"].get(f"{sede}|{carrera}|{cl}|{parid}"),
-        ]
-        v = np.asarray(p["nt_global"], float)
-        v = v / max(v.sum(), 1e-9)
-        nef = k
-        for nivel in cadena:
-            if nivel is None:
-                continue
-            c = np.asarray(nivel, float)
-            if c.sum() <= 0:
-                continue
-            v, nef = self._comp(c, v, k)
-        return v, nef
+        return self._cascada([
+            ("sede", p["nt_sede"].get(sede)),
+            ("sede·modalidad", p["nt_sede_moda"].get(f"{sede}|{moda}")),
+            ("sede·modalidad·paridad", p["nt_sede_moda_par"].get(f"{sede}|{moda}|{parid}")),
+            ("sede·carrera·modalidad", p["nt_carrera_moda"].get(f"{sede}|{carrera}|{moda}")),
+            ("sede·carrera·modalidad·paridad",
+             p["nt_carrera_moda_par"].get(f"{sede}|{carrera}|{moda}|{parid}")),
+            ("celda", p["nt_celda"].get(f"{sede}|{carrera}|{moda}|{cl}|{parid}")),
+        ], p["nt_global"], k)
+
+    def mezcla_modalidad(self, sede, carrera, ciclo, parid):
+        """
+        Reparto estimado de los ingresantes por modalidad, para cuando el
+        archivo de entrada no la declara.
+        """
+        p = self.p
+        cl = str(min(ciclo, p["cicloMax"]))
+        k = p["k_modalidad"] * self.fk
+        return self._cascada([
+            ("sede", p["nm_sede"].get(sede)),
+            ("sede·paridad", p["nm_sede_par"].get(f"{sede}|{parid}")),
+            ("sede·carrera", p["nm_carrera"].get(f"{sede}|{carrera}")),
+            ("sede·carrera·paridad", p["nm_carrera_par"].get(f"{sede}|{carrera}|{parid}")),
+            ("celda", p["nm_celda"].get(f"{sede}|{carrera}|{cl}|{parid}")),
+        ], p["nm_global"], k)
 
     # --- proyección --------------------------------------------------------
     def proyectar(self, stock0, nuevos, periodos, shock=0.0, varianza=False):
         """
-        stock0  : {periodo: {(sede,carrera,ciclo,turno): valor}} historia inicial.
-        nuevos  : {periodo: {(sede,carrera,ciclo): cantidad}}.
+        stock0  : {periodo: {(sede,carrera,modalidad,ciclo,turno): valor}}.
+        nuevos  : {periodo: {(sede,carrera,modalidad,ciclo): cantidad}}.
         shock   : desplazamiento sistémico en escala logit sobre q_L.
         varianza: si True devuelve también la varianza INDEPENDIENTE por celda.
-
-        Descomposición de la incertidumbre:
-          - SISTÉMICA: se obtiene reproyectando con shock != 0. Es común a todas
-            las celdas, luego se suma linealmente al agregar.
-          - INDEPENDIENTE (varianza V): realización multinomial, incertidumbre
-            de parámetro y varianza propagada del stock de origen. Se suma en
-            cuadratura al agregar.
         """
         p = self.p
         hist = {k: dict(v) for k, v in stock0.items()}
@@ -542,20 +623,20 @@ class Modelo:
                     continue
                 vr = hvar.get(Tori, {})
                 parO = Tori % 100
-                for (sede, carrera, ciclo, turno), val in st.items():
+                for (sede, carrera, moda, ciclo, turno), val in st.items():
                     if val <= 0:
                         continue
-                    qq, nq = self.q(sede, carrera, ciclo, parO, L)
+                    qq, nq = self.q(sede, carrera, moda, ciclo, parO, L)
                     if shock:
                         lo = np.log(qq / (1 - qq)) + shock
                         qq = 1.0 / (1.0 + np.exp(-lo))
                     if qq <= 0:
                         continue
-                    av, na = self.avance(carrera, ciclo)
-                    tt, nt = self.turno_trans(sede, ciclo, turno)
+                    av, na = self.avance(carrera, moda, ciclo)
+                    tt, nt = self.turno_trans(sede, moda, ciclo, turno)
                     tope = min(p["planCiclos"].get(carrera, p["planDefecto"]),
                                self.tope_sede(sede, T))
-                    vx = vr.get((sede, carrera, ciclo, turno), 0.0)
+                    vx = vr.get((sede, carrera, moda, ciclo, turno), 0.0)
                     for di, d in enumerate(DELTAS):
                         if av[di] <= 0:
                             continue
@@ -564,7 +645,7 @@ class Modelo:
                             if tt[ti] <= 0:
                                 continue
                             phi = qq * av[di] * tt[ti]
-                            key = (sede, carrera, c2, t2)
+                            key = (sede, carrera, moda, c2, t2)
                             dest[key] = dest.get(key, 0.0) + val * phi
                             if varianza:
                                 v_real = val * phi * (1 - phi)
@@ -573,21 +654,22 @@ class Modelo:
                                     + (1 - av[di]) / (av[di] * na)
                                     + (1 - tt[ti]) / (tt[ti] * nt))
                                 dvar[key] = dvar.get(key, 0.0) + v_real + v_par + vx * phi ** 2
-            for (sede, carrera, ciclo), cant in nuevos.get(T, {}).items():
+            for (sede, carrera, moda, ciclo), cant in nuevos.get(T, {}).items():
                 if cant <= 0:
                     continue
                 # El ingresante tampoco puede entrar a un ciclo que la sede aún
                 # no imparte ni que exceda el plan de la carrera.
                 ciclo = min(ciclo, p["planCiclos"].get(carrera, p["planDefecto"]),
                             self.tope_sede(sede, T))
-                mz, nm = self.mezcla_nuevos(sede, carrera, ciclo, parid)
+                mz, nm, _ = self.mezcla_nuevos(sede, carrera, moda, ciclo, parid)
                 for ti, t2 in enumerate(self.turnos):
                     if mz[ti] <= 0:
                         continue
-                    key = (sede, carrera, ciclo, t2)
+                    key = (sede, carrera, moda, ciclo, t2)
                     dest[key] = dest.get(key, 0.0) + cant * mz[ti]
                     if varianza:
-                        dvar[key] = dvar.get(key, 0.0) + cant * mz[ti] * (1 - mz[ti]) \
+                        dvar[key] = dvar.get(key, 0.0) \
+                            + cant * mz[ti] * (1 - mz[ti]) \
                             + (cant ** 2) * mz[ti] * (1 - mz[ti]) / nm
             res[T], resv[T] = dest, dvar
             hist[T], hvar[T] = dest, dvar
@@ -598,18 +680,20 @@ class Modelo:
 # 8. Datos observados, métricas y backtesting
 # =============================================================================
 def stock_observado(b):
-    t = b.groupby(["Periodo_real", "Sede", "Carrera", "Ciclo", "Turno"]).size()
+    t = b.groupby(["Periodo_real", "Sede", "Carrera", "Modalidad_estudios",
+                   "Ciclo", "Turno"]).size()
     out = {}
-    for (p, s, c, ci, tu), v in t.items():
-        out.setdefault(int(p), {})[(s, c, int(ci), tu)] = float(v)
+    for (p, s, c, m, ci, tu), v in t.items():
+        out.setdefault(int(p), {})[(s, c, m, int(ci), tu)] = float(v)
     return out
 
 
 def nuevos_observados(b):
-    n = b[b["esNuevo"] == 1].groupby(["Periodo_real", "Sede", "Carrera", "Ciclo"]).size()
+    n = (b[b["esNuevo"] == 1]
+         .groupby(["Periodo_real", "Sede", "Carrera", "Modalidad_estudios", "Ciclo"]).size())
     out = {}
-    for (p, s, c, ci), v in n.items():
-        out.setdefault(int(p), {})[(s, c, int(ci))] = float(v)
+    for (p, s, c, m, ci), v in n.items():
+        out.setdefault(int(p), {})[(s, c, m, int(ci))] = float(v)
     return out
 
 
@@ -621,8 +705,10 @@ def agrega(d, ix):
     return out
 
 
-NIVELES = {"Total": (), "Sede": (0,), "Carrera": (1,), "Sede×Carrera": (0, 1),
-           "Sede×Carrera×Ciclo": (0, 1, 2), "Sede×Carrera×Ciclo×Turno": (0, 1, 2, 3)}
+NIVELES = {"Total": (), "Sede": (0,), "Carrera": (1,), "Modalidad": (2,),
+           "Sede×Carrera": (0, 1), "Sede×Carrera×Modalidad": (0, 1, 2),
+           "Sede×Carrera×Modalidad×Ciclo": (0, 1, 2, 3),
+           "Sede×Carrera×Modalidad×Ciclo×Turno": (0, 1, 2, 3, 4)}
 
 
 def epap(real, prev):

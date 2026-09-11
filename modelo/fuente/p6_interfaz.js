@@ -8,6 +8,7 @@ const S = {
   carreras: DATOS.carreras.slice(),
   iS: new Map(DATOS.sedes.map((v, i) => [v, i])),
   iC: new Map(DATOS.carreras.map((v, i) => [v, i])),
+  iM: new Map(DATOS.modalidades.map((v, i) => [v, i])),
   iT: new Map(DATOS.turnos.map((v, i) => [v, i])),
   planPorIc: DATOS.carreras.map(c => DATOS.planCiclos[c] || DATOS.planDefecto),
   aperturaPorIs: DATOS.sedes.map(s => DATOS.sedeApertura[s] || { enMaduracion: false }),
@@ -49,10 +50,10 @@ function idxCarrera(nom, ciclosPlan) {
 /** Stock histórico observado, punto de partida de la recursión. */
 function stockInicial() {
   const m = new Map();
-  for (const [ip, is, ic, ci, it, v] of S.D.stock) {
+  for (const [ip, is, ic, im, ci, it, v] of S.D.stock) {
     const p = S.D.periodos[ip];
     if (!m.has(p)) m.set(p, new Map());
-    m.get(p).set(is + '|' + ic + '|' + ci + '|' + it, v);
+    m.get(p).set(is + '|' + ic + '|' + im + '|' + ci + '|' + it, v);
   }
   return m;
 }
@@ -60,10 +61,10 @@ function stockInicial() {
 /** Ingresantes observados por periodo (para el supuesto de referencia). */
 function nuevosObservados() {
   const m = new Map();
-  for (const [ip, is, ic, ci, v] of S.D.nuevos) {
+  for (const [ip, is, ic, im, ci, v] of S.D.nuevos) {
     const p = S.D.periodos[ip];
     if (!m.has(p)) m.set(p, new Map());
-    m.get(p).set(is + '|' + ic + '|' + ci, v);
+    m.get(p).set(is + '|' + ic + '|' + im + '|' + ci, v);
   }
   return m;
 }
@@ -86,6 +87,41 @@ function nuevosReferencia(periodos) {
   return out;
 }
 
+/**
+ * Convierte las filas crudas del archivo en ingresantes con modalidad.
+ * Las filas que declaran modalidad pasan tal cual; las que no, se reparten
+ * entre las tres modalidades con la composición histórica de su sede y carrera
+ * (contracción por niveles, igual que el turno). El reparto se resuelve aquí y
+ * no al cargar, de modo que responde a los parámetros de recencia del usuario.
+ */
+function construirNuevos(E, crudo) {
+  const out = new Map();
+  const detalle = [];
+  crudo.forEach((filas, T) => {
+    const m = new Map();
+    for (const r of filas) {
+      if (r.im !== null) {
+        const k = r.is + '|' + r.ic + '|' + r.im + '|' + r.ciclo;
+        m.set(k, (m.get(k) || 0) + r.cant);
+        detalle.push({ T, is: r.is, ic: r.ic, ciclo: r.ciclo, cant: r.cant, declarada: true,
+          reparto: S.D.modalidades.map((_, i) => i === r.im ? 1 : 0), nivel: 'declarada' });
+      } else {
+        const [mz, nef, nivel] = mezclaModalidad(E, r.is, r.ic, r.ciclo, T % 100);
+        for (let im = 0; im < S.D.modalidades.length; im++) {
+          if (mz[im] <= 0) continue;
+          const k = r.is + '|' + r.ic + '|' + im + '|' + r.ciclo;
+          m.set(k, (m.get(k) || 0) + r.cant * mz[im]);
+        }
+        detalle.push({ T, is: r.is, ic: r.ic, ciclo: r.ciclo, cant: r.cant, declarada: false,
+          reparto: mz, nivel });
+      }
+    }
+    out.set(T, m);
+  });
+  S.repartoModalidad = detalle;
+  return out;
+}
+
 function periodosProyeccion() {
   const n = Math.max(1, Math.min(24, +$('#horizonte').value || 6));
   const out = [];
@@ -95,7 +131,7 @@ function periodosProyeccion() {
 
 /* ---- cálculo principal ---- */
 function recalcular() {
-  const lam = Math.min(1, Math.max(0.05, +$('#lam').value || 0.5));
+  const lam = Math.min(1, Math.max(0.05, +$('#lam').value || 0.65));
   const lamN = Math.min(1, Math.max(0.05, +$('#lamN').value || 0.3));
   const fk = Math.min(10, Math.max(0.1, +$('#factorK').value || 1));
   const conf = +$('#confianza').value || 0.8;
@@ -106,7 +142,8 @@ function recalcular() {
   S.E.nSedes = S.sedes.length;
 
   const periodos = periodosProyeccion();
-  const nuevos = S.entrada ? S.entrada.mapa : nuevosReferencia(periodos);
+  S.repartoModalidad = null;
+  const nuevos = S.entrada ? construirNuevos(S.E, S.entrada.mapa) : nuevosReferencia(periodos);
   const stock0 = stockInicial();
 
   const sigma = S.D.varianza.sigma_logit_choque;
@@ -125,12 +162,12 @@ function recalcular() {
 /* ---- agregación ---- */
 function descomponer(clave) {
   const p = clave.split('|');
-  return { is: +p[0], ic: +p[1], ciclo: +p[2], it: +p[3] };
+  return { is: +p[0], ic: +p[1], im: +p[2], ciclo: +p[3], it: +p[4] };
 }
 function nombreDe(d) {
   return {
     Sede: S.sedes[d.is], Carrera: S.carreras[d.ic],
-    Ciclo: d.ciclo, Turno: S.D.turnos[d.it],
+    Modalidad: S.D.modalidades[d.im], Ciclo: d.ciclo, Turno: S.D.turnos[d.it],
   };
 }
 /** Agrega un Map de celdas según una función de clave. */
@@ -160,8 +197,31 @@ const ALIAS = {
   carrera: ['carrera', 'programa', 'programaacademico', 'escuela', 'escuelaprofesional'],
   ciclo: ['ciclo', 'ciclodeestudios', 'cicloingreso', 'ciclodeingreso', 'ciclomatricula'],
   nuevos: ['nuevos', 'ingresantes', 'cantidad', 'alumnosnuevos', 'estudiantesnuevos', 'matriculanueva', 'n'],
+  modalidad: ['modalidad', 'modalidadestudios', 'modalidaddeestudios', 'modalidadacademica',
+    'modalidadestudio', 'tipoestudio', 'modelo'],
   plan: ['ciclosplan', 'ciclos', 'duracion', 'ciclostotales', 'planciclos'],
 };
+
+/** Reconoce la modalidad escrita de cualquier forma razonable. */
+function leerModalidad(txt) {
+  const n = norm(txt);
+  if (!n) return null;
+  const exacto = S.D.modalidades.findIndex(m => norm(m) === n);
+  if (exacto >= 0) return exacto;
+  if (/adistancia|virtual|remoto|online|enlinea/.test(n)) {
+    const i = S.D.modalidades.findIndex(m => /distancia/.test(norm(m)));
+    if (i >= 0) return i;
+  }
+  if (/semi|blended|mixta|mixto|hibrid/.test(n)) {
+    const i = S.D.modalidades.findIndex(m => /semi/.test(norm(m)));
+    if (i >= 0) return i;
+  }
+  if (/presencial/.test(n)) {
+    const i = S.D.modalidades.findIndex(m => norm(m) === 'presencial');
+    if (i >= 0) return i;
+  }
+  return undefined;      // escrita pero irreconocible
+}
 const norm = s => String(s == null ? '' : s).trim().toLowerCase()
   .normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]/g, '');
 
@@ -190,7 +250,7 @@ async function cargarArchivo(file) {
         '. Descarga la plantilla para ver el formato esperado.');
     }
 
-    const filas = [], avisos = [];
+    const filas = [], avisos = [], ilegibles = [];
     const periodos = new Set();
     let descartadas = 0;
     tabla.filas.forEach((f, i) => {
@@ -200,10 +260,13 @@ async function cargarArchivo(file) {
       const ciclo = Math.round(+String(f[col.ciclo]).replace(',', '.'));
       const cant = +String(f[col.nuevos]).replace(/\s/g, '').replace(',', '.');
       const plan = col.plan !== undefined ? Math.round(+f[col.plan]) || 0 : 0;
+      const modTxt = col.modalidad !== undefined ? f[col.modalidad] : '';
       if (!isFinite(per) || isNaN(per)) { descartadas++; return; }
       if (!sede || !carrera || !isFinite(ciclo) || ciclo < 1 || !isFinite(cant)) { descartadas++; return; }
       if (cant <= 0) return;
-      filas.push({ fila: i + 2, per, sede, carrera, ciclo, cant, plan });
+      const im = leerModalidad(modTxt);
+      if (im === undefined) ilegibles.push({ fila: i + 2, txt: String(modTxt).trim() });
+      filas.push({ fila: i + 2, per, sede, carrera, ciclo, cant, plan, im: im === undefined ? null : im });
       periodos.add(per);
     });
     if (!filas.length) throw new Error('No se pudo leer ninguna fila válida del archivo.');
@@ -237,8 +300,14 @@ async function cargarArchivo(file) {
     });
 
     // Segunda pasada: topes de plan y de maduración de sede.
+    /* El mapa guarda las filas en crudo, con la modalidad declarada o nula. El
+       reparto de las no declaradas se resuelve en cada recálculo, de modo que
+       responde a los parámetros de recencia que elija el usuario. */
     const mapa = new Map();
-    const recortes = { plan: 0, sede: 0 };
+    /* El recorte por maduración se detalla hasta dos veces POR SEDE: si varias
+       sedes están en despliegue, una cuota global escondería las últimas
+       detrás de las primeras y el aviso perdería su utilidad. */
+    const recortes = { plan: 0, sede: 0, porSede: new Map() };
     for (const r of filas) {
       const topePlan = S.planPorIc[r.ic];
       const topeSed = topeCicloSede(r.is, r.per);
@@ -246,7 +315,9 @@ async function cargarArchivo(file) {
       if (r.ciclo > tope) {
         if (topeSed < topePlan) {
           recortes.sede++;
-          if (recortes.sede <= 3) avisos.push({
+          const vistas = (recortes.porSede.get(r.is) || 0) + 1;
+          recortes.porSede.set(r.is, vistas);
+          if (vistas <= 2) avisos.push({
             t: 'aviso', m: 'Fila ' + r.fila + ': ' + r.sede + ' no imparte todavía el ciclo ' +
               r.ciclo + ' en ' + rotuloPeriodo(r.per) + ' (inició en ' +
               rotuloPeriodo(S.aperturaPorIs[r.is].inicio) + ', llega hasta el ciclo ' + tope +
@@ -261,12 +332,13 @@ async function cargarArchivo(file) {
         }
         r.ciclo = tope;
       }
-      if (!mapa.has(r.per)) mapa.set(r.per, new Map());
-      const k = r.is + '|' + r.ic + '|' + r.ciclo;
-      mapa.get(r.per).set(k, (mapa.get(r.per).get(k) || 0) + r.cant);
+      if (!mapa.has(r.per)) mapa.set(r.per, []);
+      mapa.get(r.per).push({ is: r.is, ic: r.ic, im: r.im, ciclo: r.ciclo, cant: r.cant });
     }
-    if (recortes.sede > 3) avisos.push({
-      t: 'aviso', m: '… y ' + (recortes.sede - 3) + ' fila(s) más recortadas por el ciclo máximo de su sede.'
+    let detalladas = 0;
+    recortes.porSede.forEach(n => { detalladas += Math.min(n, 2); });
+    if (recortes.sede > detalladas) avisos.push({
+      t: 'aviso', m: '… y ' + (recortes.sede - detalladas) + ' fila(s) más recortadas por el ciclo máximo de su sede.'
     });
     if (recortes.plan > 3) avisos.push({
       t: 'aviso', m: '… y ' + (recortes.plan - 3) + ' fila(s) más recortadas por el plan de su carrera.'
@@ -279,6 +351,21 @@ async function cargarArchivo(file) {
         t: 'error', m: antiguos.length + ' semestre(s) del archivo (' +
           antiguos.map(rotuloPeriodo).join(', ') + ') son anteriores o iguales al último observado (' +
           rotuloPeriodo(ULTIMO) + '). Esos ingresantes no se proyectan.'
+      });
+    }
+    const sinModalidad = filas.filter(r => r.im === null);
+    if (col.modalidad === undefined) {
+      avisos.push({
+        t: 'aviso', m: 'El archivo no trae columna de modalidad. El modelo reparte cada fila ' +
+          'entre Presencial, Semi Presencial y A distancia con la composición histórica de su ' +
+          'sede y carrera. Declararla mejora la proyección: la continuación del primer ciclo va ' +
+          'del 42 % a distancia al 71 % presencial.'
+      });
+    } else if (sinModalidad.length) {
+      avisos.push({
+        t: 'aviso', m: fmtN(sinModalidad.length) + ' fila(s) sin modalidad legible' +
+          (ilegibles.length ? ' (p. ej. fila ' + ilegibles[0].fila + ': «' + esc(ilegibles[0].txt) + '»)' : '') +
+          '. En esas filas el reparto por modalidad se estima con la composición histórica.'
       });
     }
     if (S.carrerasNuevas.size) {
@@ -296,7 +383,12 @@ async function cargarArchivo(file) {
       });
     }
 
-    S.entrada = { nombre: file.name, filas, mapa, periodos: per, avisos };
+    S.entrada = {
+      nombre: file.name, filas, mapa, periodos: per, avisos,
+      conModalidad: col.modalidad !== undefined,
+      declaradas: filas.filter(r => r.im !== null).length,
+      estimadas: sinModalidad.length,
+    };
 
     // El horizonte se ajusta al último semestre presente en el archivo
     const maxPer = per[per.length - 1];
@@ -323,7 +415,7 @@ function descargarPlantilla() {
   // Semilla: dos semestres siguientes con el ingreso del semestre homólogo
   const obs = nuevosObservados();
   const per = [moverPeriodo(ULTIMO, 1), moverPeriodo(ULTIMO, 2)];
-  const filas = [['Periodo', 'Sede', 'Carrera', 'Ciclo', 'Nuevos', 'CiclosPlan'].map(H)];
+  const filas = [['Periodo', 'Sede', 'Carrera', 'Modalidad', 'Ciclo', 'Nuevos', 'CiclosPlan'].map(H)];
   for (const T2 of per) {
     let fuente = null;
     for (let i = S.D.periodos.length - 1; i >= 0; i--) {
@@ -332,8 +424,9 @@ function descargarPlantilla() {
     const m = obs.get(fuente) || new Map();
     const ordenado = Array.from(m.entries()).sort((a, b) => b[1] - a[1]);
     for (const [k, v] of ordenado) {
-      const [is, ic, ci] = k.split('|').map(Number);
-      filas.push([rotuloPeriodo(T2), S.D.sedes[is], S.D.carreras[ic], ci, v, '']);
+      const [is, ic, im, ci] = k.split('|').map(Number);
+      filas.push([rotuloPeriodo(T2), S.D.sedes[is], S.D.carreras[ic],
+        S.D.modalidades[im], ci, v, '']);
     }
   }
 
@@ -344,7 +437,7 @@ function descargarPlantilla() {
     [H('Cómo usar esta plantilla')],
     ['1. Edite la hoja «Ingresantes»: una fila por semestre, sede, carrera y ciclo de ingreso.'],
     ['2. La columna «Nuevos» es la cantidad de estudiantes que INGRESAN (no incluye continuadores).'],
-    ['3. NO se declara el turno: el modelo lo estima con la composición histórica de la sede y la carrera.'],
+    ['3. NO se declara el turno: el modelo lo estima con la composición histórica de la sede, la carrera y la modalidad.'],
     ['4. Cargue el archivo en el modelo con el botón «Cargar ingresantes».'],
     [],
     [H('Columnas')],
@@ -352,6 +445,7 @@ function descargarPlantilla() {
     ['Sede', 'Obligatoria. Debe coincidir con el catálogo de la hoja «Catálogos» para heredar su patrón de turno.'],
     ['Carrera', 'Obligatoria. Si no figura en el catálogo se trata como PROGRAMA NUEVO.'],
     ['Ciclo', 'Obligatoria. Ciclo al que ingresa el estudiante (1 en la admisión ordinaria; >1 en traslados y convalidaciones).'],
+    ['Modalidad', 'Recomendada. Presencial, Semi Presencial o A distancia. Si se omite la columna o la celda, el modelo reparte esa fila entre las tres con la composición histórica de su sede y carrera.'],
     ['Nuevos', 'Obligatoria. Número entero de ingresantes de esa combinación.'],
     ['CiclosPlan', 'Opcional. Ciclos totales del plan de estudios. Sólo hace falta para un programa nuevo cuya duración no sea de ' + S.D.planDefecto + ' ciclos.'],
     [],
@@ -360,6 +454,14 @@ function descargarPlantilla() {
     ['Al no tener historia propia, el modelo le aplica el comportamiento de continuación del ciclo'],
     ['y de la sede correspondientes, e informa de ello en la pestaña «Ingresantes».'],
     ['Si el plan no dura ' + S.D.planDefecto + ' ciclos, indíquelo en «CiclosPlan».'],
+    [],
+    [H('Por qué conviene declarar la modalidad')],
+    ['La modalidad cambia el comportamiento del estudiante de forma muy marcada. En el primer'],
+    ['ciclo, la continuación al semestre siguiente va del 42 % en la modalidad a distancia al 71 %'],
+    ['en la presencial, con la semipresencial en medio (56 %). También determina casi por completo'],
+    ['el turno: a distancia es noche en un 90 %, mientras que presencial es mañana en un 77 %.'],
+    ['Si la columna se deja vacía el modelo estima el reparto, pero la composición está en fuerte'],
+    ['deriva —a distancia pasó del 4,8 % al 19,6 % de la matrícula— y esa estimación arrastra error.'],
     [],
     [H('Sedes nuevas y maduración')],
     ['Una sede que abre despliega su plan de estudios semestre a semestre: en el de apertura'],
@@ -378,7 +480,7 @@ function descargarPlantilla() {
   const cat = [['Sedes', 'Turnos observados en la sede', 'Ciclo máximo ofertable'].map(H)];
   S.D.sedes.forEach((s, is) => {
     const ts = new Set();
-    S.D.stock.forEach(f => { if (f[1] === is) ts.add(S.D.turnos[f[4]]); });
+    S.D.stock.forEach(f => { if (f[1] === is) ts.add(S.D.turnos[f[5]]); });
     const ap = S.D.sedeApertura[s];
     const nota = !ap || !ap.enMaduracion ? 'Plan completo'
       : 'Abrió en ' + rotuloPeriodo(ap.inicio) + ': ciclo ' +
@@ -387,12 +489,19 @@ function descargarPlantilla() {
     cat.push([s, Array.from(ts).join(' · '), nota]);
   });
   cat.push([]);
-  cat.push(['Carreras', 'Ciclos del plan'].map(H));
-  S.D.carreras.forEach(c => cat.push([c, S.D.planCiclos[c] || S.D.planDefecto]));
+  cat.push(['Modalidades'].map(H));
+  S.D.modalidades.forEach(m => cat.push([m]));
+  cat.push([]);
+  cat.push(['Carreras', 'Ciclos del plan', 'Modalidades con historia en la base'].map(H));
+  S.D.carreras.forEach((c, ic) => {
+    const ms = S.D.modalidades
+      .filter((_, im) => S.D.oferta.some(o => o[1] === ic && o[2] === im));
+    cat.push([c, S.D.planCiclos[c] || S.D.planDefecto, ms.join(' · ') || '—']);
+  });
 
   const blob = construirXlsx([
     { nombre: 'Instrucciones', filas: inst, anchos: [46, 86] },
-    { nombre: 'Ingresantes', filas, anchos: [11, 13, 52, 8, 10, 12], inmovilizar: 1 },
+    { nombre: 'Ingresantes', filas, anchos: [11, 13, 52, 17, 8, 10, 12], inmovilizar: 1 },
     { nombre: 'Catálogos', filas: cat, anchos: [52, 30, 46] },
   ]);
   descargar('plantilla_ingresantes_' + hoyISO() + '.xlsx', blob);
@@ -409,6 +518,7 @@ function pintarTodo() {
   pintarSerie();
   pintarComposicion();
   pintarPorSede();
+  pintarPorModalidad();
   pintarTablaResumen();
   poblarFiltros();
   pintarDetalle();
@@ -432,7 +542,7 @@ function pintarKpis() {
   const ult = P.periodos[P.periodos.length - 1];
   const cen = sumaMapa(P.cen.get(ult)), alt = sumaMapa(P.alt.get(ult)), baj = sumaMapa(P.baj.get(ult));
   const sd = Math.sqrt(sumaMapa(P.varz.get(ult)));
-  const base = S.D.stock.filter(f => f[0] === S.D.periodos.length - 1).reduce((s, f) => s + f[5], 0);
+  const base = S.D.stock.filter(f => f[0] === S.D.periodos.length - 1).reduce((s, f) => s + f[6], 0);
   const primero = P.periodos[0];
   const cen1 = sumaMapa(P.cen.get(primero));
   const nuevos = nuevosDe(ult);
@@ -451,6 +561,11 @@ function pintarKpis() {
       'Choque sistémico de ±' + fmtD(P.z) + ' σ sobre la continuación'],
     ['Intervalo de predicción ' + fmtP(P.conf), fmtN(cen - P.z * sd) + ' – ' + fmtN(cen + P.z * sd),
       'Añade el azar de realización (±' + fmtN(P.z * sd) + ')'],
+    ['Modalidad a distancia en ' + rotuloPeriodo(ult),
+      fmtP(sumaMapa(agrupar(P.cen.get(ult), d => S.D.modalidades[d.im] === 'A distancia' ? 'x' : null)) / Math.max(cen, 1)),
+      'Observado en ' + rotuloPeriodo(ULTIMO) + ': ' +
+      fmtP(S.D.stock.filter(f => f[0] === S.D.periodos.length - 1 &&
+        S.D.modalidades[f[3]] === 'A distancia').reduce((s, f) => s + f[6], 0) / Math.max(base, 1))],
   ].map(([et, vl, de]) =>
     '<div class="kpi"><div class="et">' + esc(et) + '</div><div class="vl">' + vl +
     '</div><div class="de">' + de + '</div></div>').join('');
@@ -461,7 +576,7 @@ function pintarSerie() {
   const obsPorPer = new Map();
   S.D.stock.forEach(f => {
     const p = S.D.periodos[f[0]];
-    obsPorPer.set(p, (obsPorPer.get(p) || 0) + f[5]);
+    obsPorPer.set(p, (obsPorPer.get(p) || 0) + f[6]);
   });
   const datos = [];
   S.D.periodos.forEach(p => datos.push({ et: rotuloPeriodo(p), obs: obsPorPer.get(p) }));
@@ -510,15 +625,39 @@ function pintarPorSede() {
   graficoApilado('#grSede', et, series);
 }
 
+/**
+ * Composición por modalidad. Se muestra junto a la histórica porque la mezcla
+ * está en fuerte deriva —la modalidad a distancia pasa del 4,8 % al 19,6 % de
+ * la matrícula— y es la variable que más mueve la continuación del primer ciclo.
+ */
+function pintarPorModalidad() {
+  const P = S.proy;
+  const obs = new Map();
+  S.D.stock.forEach(f => {
+    const p = S.D.periodos[f[0]], k = p + '|' + f[3];
+    obs.set(k, (obs.get(k) || 0) + f[6]);
+  });
+  const et = S.D.periodos.map(rotuloPeriodo).concat(P.periodos.map(rotuloPeriodo));
+  const series = S.D.modalidades.map((nom, im) => ({
+    t: nom, c: serieColor(im),
+    v: S.D.periodos.map(p => obs.get(p + '|' + im) || 0)
+      .concat(P.periodos.map(T => sumaMapa(agrupar(P.cen.get(T), d => d.im === im ? 'x' : null)))),
+  }));
+  leyenda('#legModalidad', series.map(s => ({ t: s.t, c: s.c })));
+  graficoApilado('#grModalidad', et, series, {
+    rotulos: false, alto: 260, desdeProy: S.D.periodos.length,
+  });
+}
+
 function pintarTablaResumen() {
   const P = S.proy;
   const f = [];
   f.push('<thead><tr><th class="txt">Semestre</th><th>Ingresantes</th><th>Continuadores</th>' +
     '<th>Pesimista</th><th>Moderado</th><th>Optimista</th>' +
     '<th>Intervalo de predicción ' + fmtP(P.conf) + '</th><th>Variación</th></tr></thead><tbody>');
-  let prev = S.D.stock.filter(x => x[0] === S.D.periodos.length - 1).reduce((s, x) => s + x[5], 0);
+  let prev = S.D.stock.filter(x => x[0] === S.D.periodos.length - 1).reduce((s, x) => s + x[6], 0);
   f.push('<tr><td class="txt">' + rotuloPeriodo(ULTIMO) + ' <span class="pastilla">observado</span></td>' +
-    '<td>' + fmtN(S.D.nuevos.filter(x => x[0] === S.D.periodos.length - 1).reduce((s, x) => s + x[4], 0)) + '</td>' +
+    '<td>' + fmtN(S.D.nuevos.filter(x => x[0] === S.D.periodos.length - 1).reduce((s, x) => s + x[5], 0)) + '</td>' +
     '<td colspan="4">' + fmtN(prev) + '</td><td>—</td><td>—</td></tr>');
   P.periodos.forEach(T => {
     const c = sumaMapa(P.cen.get(T)), a = sumaMapa(P.alt.get(T)), b = sumaMapa(P.baj.get(T));
@@ -551,12 +690,14 @@ function poblarFiltros() {
   P.periodos.forEach(T => P.cen.get(T).forEach((v, k) => { if (v > 0.05) usadas.add(descomponer(k).ic); }));
   fijar('#fCarrera', Array.from(usadas).sort((a, b) => S.carreras[a].localeCompare(S.carreras[b]))
     .map(i => ({ v: i, t: S.carreras[i] + (S.carrerasNuevas.has(S.carreras[i]) ? ' (nuevo)' : '') })), 'Todas');
+  fijar('#fModalidad', S.D.modalidades.map((m, i) => ({ v: i, t: m })), 'Todas');
   fijar('#fTurno', S.D.turnos.map((t, i) => ({ v: i, t })), 'Todos');
 }
 
 function filtroActivo() {
   const g = s => { const v = $(s).value; return v === '' ? null : +v; };
-  return { per: g('#fPeriodo'), is: g('#fSede'), ic: g('#fCarrera'), it: g('#fTurno') };
+  return { per: g('#fPeriodo'), is: g('#fSede'), ic: g('#fCarrera'),
+           im: g('#fModalidad'), it: g('#fTurno') };
 }
 
 function celdasFiltradas(escenario) {
@@ -572,6 +713,7 @@ function celdasFiltradas(escenario) {
       const d = descomponer(k);
       if (fa.is !== null && d.is !== fa.is) return;
       if (fa.ic !== null && d.ic !== fa.ic) return;
+      if (fa.im !== null && d.im !== fa.im) return;
       if (fa.it !== null && d.it !== fa.it) return;
       out.push({ T, k, v, d, sd: Math.sqrt(P.varz.get(T).get(k) || 0) });
     });
@@ -581,6 +723,7 @@ function celdasFiltradas(escenario) {
 
 const VALOR_DIM = {
   Sede: d => S.sedes[d.is], Carrera: d => S.carreras[d.ic],
+  Modalidad: d => S.D.modalidades[d.im],
   Ciclo: d => d.ciclo, Turno: d => S.D.turnos[d.it],
 };
 function etiquetaDim(dim, c) {
@@ -633,12 +776,14 @@ function pintarDetalle() {
   // Detalle por celda
   const top = celdas.slice().sort((a, b) => b.v - a.v).slice(0, 300);
   const g = ['<thead><tr><th class="txt">Semestre</th><th class="txt">Sede</th><th class="txt">Carrera</th>' +
-    '<th>Ciclo</th><th class="txt">Turno</th><th>Matriculados</th><th>Precisión ±</th></tr></thead><tbody>'];
+    '<th class="txt">Modalidad</th><th>Ciclo</th><th class="txt">Turno</th>' +
+    '<th>Matriculados</th><th>Precisión ±</th></tr></thead><tbody>'];
   top.forEach(c => {
     const nb = nombreDe(c.d);
     g.push('<tr><td class="txt">' + rotuloPeriodo(c.T) + '</td><td class="txt">' + esc(nb.Sede) +
       '</td><td class="txt">' + esc(nb.Carrera) +
       (S.carrerasNuevas.has(nb.Carrera) ? ' <span class="pastilla nueva">nuevo</span>' : '') +
+      '</td><td class="txt">' + esc(nb.Modalidad) +
       '</td><td>' + nb.Ciclo + '</td><td class="txt">' + esc(nb.Turno) + '</td><td><b>' + fmtN(c.v) +
       '</b></td><td class="mini">' + fmtN(S.proy.z * c.sd) + '</td></tr>');
   });
@@ -657,6 +802,11 @@ function pintarIngresantes() {
       '<dt>Filas válidas</dt><dd>' + fmtN(S.entrada.filas.length) + '</dd>' +
       '<dt>Semestres declarados</dt><dd style="text-align:left">' + S.entrada.periodos.map(rotuloPeriodo).join(', ') + '</dd>' +
       '<dt>Total de ingresantes</dt><dd>' + fmtN(S.entrada.filas.reduce((s, f) => s + f.cant, 0)) + '</dd>' +
+      '<dt>Modalidad</dt><dd style="text-align:left">' +
+      (S.entrada.conModalidad
+        ? fmtN(S.entrada.declaradas) + ' fila(s) declarada(s)' +
+          (S.entrada.estimadas ? ' · ' + fmtN(S.entrada.estimadas) + ' estimada(s)' : '')
+        : 'no declarada: se estima en todas las filas') + '</dd>' +
       '<dt>Programas nuevos</dt><dd>' + (S.carrerasNuevas.size || '—') + '</dd></dl>' + av;
   } else {
     e.innerHTML = '<div class="vacio">' +
@@ -671,27 +821,102 @@ function pintarIngresantes() {
     const m = P.nuevos.get(T);
     if (!m) return;
     m.forEach((cant, k) => {
-      const [is, ic, ci] = k.split('|').map(Number);
-      const [mz, nef, nivel] = mezclaNuevos(S.E, is, ic, ci, T % 100);
-      filas.push({ T, is, ic, ci, cant, mz, nivel });
+      const [is, ic, im, ci] = k.split('|').map(Number);
+      const [mz, nef, nivel] = mezclaNuevos(S.E, is, ic, im, ci, T % 100);
+      filas.push({ T, is, ic, im, ci, cant, mz, nivel });
     });
   });
   filas.sort((a, b) => a.T - b.T || b.cant - a.cant);
   const h = ['<thead><tr><th class="txt">Semestre</th><th class="txt">Sede</th><th class="txt">Carrera</th>' +
-    '<th>Ciclo</th><th>Nuevos</th>' + S.D.turnos.map(t => '<th>' + esc(t) + '</th>').join('') +
+    '<th class="txt">Modalidad</th><th>Ciclo</th><th>Nuevos</th>' +
+    S.D.turnos.map(t => '<th>' + esc(t) + '</th>').join('') +
     '<th class="txt">Nivel usado</th></tr></thead><tbody>'];
   filas.slice(0, 400).forEach(f => {
     h.push('<tr><td class="txt">' + rotuloPeriodo(f.T) + '</td><td class="txt">' + esc(S.sedes[f.is]) +
       '</td><td class="txt">' + esc(S.carreras[f.ic]) +
       (S.carrerasNuevas.has(S.carreras[f.ic]) ? ' <span class="pastilla nueva">nuevo</span>' : '') +
-      '</td><td>' + f.ci + '</td><td><b>' + fmtN(f.cant) + '</b></td>' +
-      f.mz.map(p => '<td>' + fmtN(f.cant * p) + ' <span class="mini">(' + fmtP(p) + ')</span></td>').join('') +
+      '</td><td class="txt">' + esc(S.D.modalidades[f.im]) +
+      '</td><td>' + f.ci + '</td><td><b>' + fmtD(f.cant) + '</b></td>' +
+      f.mz.map(p => '<td>' + fmtD(f.cant * p) + ' <span class="mini">(' + fmtP(p) + ')</span></td>').join('') +
       '<td class="txt mini">' + esc(f.nivel) + '</td></tr>');
   });
-  if (filas.length > 400) h.push('<tr><td colspan="' + (6 + S.D.turnos.length) +
+  if (filas.length > 400) h.push('<tr><td colspan="' + (7 + S.D.turnos.length) +
     '" class="mini">… y ' + fmtN(filas.length - 400) + ' filas más (todas en la exportación).</td></tr>');
   h.push('</tbody>');
   $('#tbIngresantes').innerHTML = h.join('');
+
+  pintarRepartoModalidad();
+}
+
+/**
+ * Continuación por ciclo y modalidad. Se dibuja como líneas y no como barras
+ * agrupadas porque el ciclo es ordinal y lo que hay que leer es la forma de las
+ * tres curvas: arrancan muy separadas y convergen a partir del tercer ciclo.
+ */
+function pintarModalidadModelo() {
+  const cmax = S.D.cicloMax;
+  const ciclos = [];
+  for (let ci = 1; ci <= cmax; ci++) {
+    const a = S.E.porCiclo.get(String(ci));
+    if (a && a[0] > 0) ciclos.push(ci);
+  }
+  const series = S.D.modalidades.map((nom, im) => ({
+    t: nom, c: serieColor(im),
+    v: ciclos.map(ci => {
+      const a = S.E.porModa.get(im + '|' + ci + '|1');
+      const b2 = S.E.porModa.get(im + '|' + ci + '|2');
+      let n = 0, k = 0;
+      if (a) { n += a[0]; k += a[S.E.LAG]; }
+      if (b2) { n += b2[0]; k += b2[S.E.LAG]; }
+      return n > 0 ? k / n * 100 : null;
+    }),
+  }));
+  // Los ciclos sin evidencia en una modalidad se recortan al último con dato
+  series.forEach(se => {
+    let ultimo = se.v.length - 1;
+    while (ultimo >= 0 && se.v[ultimo] === null) ultimo--;
+    se.v = se.v.slice(0, ultimo + 1).map(v => v === null ? 0 : v);
+  });
+  const largo = Math.max.apply(null, series.map(s2 => s2.v.length));
+  series.forEach(se => { while (se.v.length < largo) se.v.push(null); });
+  leyenda('#legContMod', series.map(s2 => ({ t: s2.t, c: s2.c })));
+  graficoLineas('#grContMod', ciclos.slice(0, largo).map(String), series, {
+    alto: 260, fmtEje: v => fmtN(v) + ' %', tope100: true,
+  });
+
+  // Tabla resumen por modalidad
+  const h = ['<thead><tr><th class="txt">Modalidad</th><th>Matrícula ' + rotuloPeriodo(ULTIMO) +
+    '</th><th>Continuación ciclo 1</th><th>Continuación ciclos 2-9</th>' +
+    '<th>Avanza un ciclo</th><th>Repite ciclo</th></tr></thead><tbody>'];
+  S.D.modalidades.forEach((nom, im) => {
+    const mat = S.D.stock.filter(f => f[0] === S.D.periodos.length - 1 && f[3] === im)
+      .reduce((a, f) => a + f[6], 0);
+    const tasa = (cis) => {
+      let n = 0, k = 0;
+      for (const ci of cis) for (const pa of [1, 2]) {
+        const a = S.E.porModa.get(im + '|' + ci + '|' + pa);
+        if (a) { n += a[0]; k += a[S.E.LAG]; }
+      }
+      return n > 0 ? k / n : null;
+    };
+    const c1 = tasa([1]);
+    const c29 = tasa([2, 3, 4, 5, 6, 7, 8, 9]);
+    let av = null;
+    const acc = new Array(S.E.ND).fill(0);
+    for (let ci = 1; ci <= cmax; ci++) {
+      const a = S.E.avModa.get(im + '|' + ci);
+      if (a) for (let j = 0; j < S.E.ND; j++) acc[j] += a[j];
+    }
+    const sa = acc.reduce((x, y) => x + y, 0);
+    const iMas1 = S.D.deltas.indexOf(1), iCero = S.D.deltas.indexOf(0);
+    h.push('<tr><td class="txt"><i class="pin" style="background:' + serieColor(im) +
+      '"></i>' + esc(nom) + '</td><td>' + fmtN(mat) + '</td><td>' +
+      (c1 == null ? '—' : fmtP(c1)) + '</td><td>' + (c29 == null ? '—' : fmtP(c29)) +
+      '</td><td>' + (sa ? fmtP(acc[iMas1] / sa) : '—') + '</td><td>' +
+      (sa ? fmtP(acc[iCero] / sa) : '—') + '</td></tr>');
+  });
+  h.push('</tbody>');
+  $('#tbModalidad').innerHTML = h.join('');
 }
 
 /**
@@ -725,16 +950,49 @@ function pintarMaduracion() {
   $('#tbMaduracion').innerHTML = h.join('');
 }
 
+/**
+ * Reparto por modalidad de las filas del archivo que no la declaran. Si el
+ * archivo la trae completa la tarjeta se oculta, porque no hay nada que estimar.
+ */
+function pintarRepartoModalidad() {
+  const cont = $('#tjModalidadNuevos');
+  const det = (S.repartoModalidad || []).filter(d => !d.declarada);
+  if (!det.length) {
+    cont.style.display = 'none';
+    return;
+  }
+  cont.style.display = '';
+  det.sort((a, b) => a.T - b.T || b.cant - a.cant);
+  const h = ['<thead><tr><th class="txt">Semestre</th><th class="txt">Sede</th>' +
+    '<th class="txt">Carrera</th><th>Ciclo</th><th>Nuevos</th>' +
+    S.D.modalidades.map(m => '<th>' + esc(m) + '</th>').join('') +
+    '<th class="txt">Nivel usado</th></tr></thead><tbody>'];
+  det.slice(0, 300).forEach(d => {
+    h.push('<tr><td class="txt">' + rotuloPeriodo(d.T) + '</td><td class="txt">' + esc(S.sedes[d.is]) +
+      '</td><td class="txt">' + esc(S.carreras[d.ic]) + '</td><td>' + d.ciclo +
+      '</td><td><b>' + fmtN(d.cant) + '</b></td>' +
+      d.reparto.map(p => '<td>' + fmtD(d.cant * p) + ' <span class="mini">(' + fmtP(p) + ')</span></td>').join('') +
+      '<td class="txt mini">' + esc(d.nivel) + '</td></tr>');
+  });
+  if (det.length > 300) h.push('<tr><td colspan="' + (6 + S.D.modalidades.length) +
+    '" class="mini">… y ' + fmtN(det.length - 300) + ' filas más.</td></tr>');
+  h.push('</tbody>');
+  $('#tbModalidadNuevos').innerHTML = h.join('');
+}
+
 /* ---- modelo y validación ---- */
 function pintarModelo() {
   const P = S.proy, V = S.D.varianza, VA = S.D.validacion;
 
   $('#ecuacion').innerHTML =
-    'M(T, s, c, k, u)  =  N(T, s, c, k, u)  +  Σ<sub>L=1..' + S.D.lagMax + '</sub> Σ<sub>k\', u\'</sub> ' +
-    'M(T−L, s, c, k\', u\') · q<sub>L</sub>(s,c,k\',p\') · A(k\'→k | c,k\') · U(u\'→u | s,k\')\n\n' +
+    'M(T, s, c, m, k, u)  =  N(T, s, c, m, k, u)\n' +
+    '                     +  Σ<sub>L=1..' + S.D.lagMax + '</sub> Σ<sub>k\', u\'</sub> ' +
+    'M(T−L, s, c, m, k\', u\') · q<sub>L</sub>(s,c,m,k\',p\') · A(k\'→k | c,m,k\') · U(u\'→u | s,m,k\')\n\n' +
     '  M  matrícula      N  ingresantes del archivo      T  semestre      s  sede\n' +
-    '  c  carrera        k  ciclo       u  turno         p  paridad del semestre (I ó II)\n' +
-    '  q<sub>L</sub> continuación con rezago L    A  avance de ciclo    U  transición de turno';
+    '  c  carrera        m  modalidad    k  ciclo        u  turno\n' +
+    '  p  paridad del semestre (I ó II)\n' +
+    '  q<sub>L</sub> continuación con rezago L    A  avance de ciclo    U  transición de turno\n\n' +
+    'La sede, la carrera y la modalidad se conservan: no aparecen primadas en el flujo.';
 
   const kk = S.E.kCont;
   $('#parModelo').innerHTML = [
@@ -745,12 +1003,16 @@ function pintarModelo() {
     ['Rezago máximo modelado', S.D.lagMax + ' semestres'],
     ['Ponderación de recencia λ', fmtD(P.lam) + ' (semivida ' + fmtD(Math.log(0.5) / Math.log(P.lam)) + ' semestres)'],
     ['λ del reparto de turno', fmtD(P.lamN)],
-    ['k de contracción (celda · carrera · ciclo·par · ciclo)',
-      [kk.celda[0], kk.carrera[0], kk.ciclopar[0], kk.ciclo[0]].map(x => fmtD(x)).join(' · ')],
-    ['k de avance · turno · ingresantes',
-      [S.E.kAvance, S.E.kTurno, S.E.kNuevos].map(x => fmtD(x)).join(' · ')],
+    ['k de contracción (celda · carrera · modalidad · ciclo·par · ciclo)',
+      [kk.celda[0], kk.carrera[0], kk.moda[0], kk.ciclopar[0], kk.ciclo[0]].map(x => fmtD(x)).join(' · ')],
+    ['k de avance · turno · turno de nuevos · modalidad de nuevos',
+      [S.E.kAvance, S.E.kTurno, S.E.kNuevos, S.E.kModalidad].map(x => fmtD(x)).join(' · ')],
+    ['Modalidades', S.D.modalidades.join(' · ')],
     ['Continuación global por rezago', S.E.contGlobal.map(x => fmtP2(x)).join(' · ')],
   ].map(([a, b]) => '<dt>' + esc(a) + '</dt><dd>' + b + '</dd>').join('');
+
+  // Modalidad de estudios
+  pintarModalidadModelo();
 
   // Maduración de sede
   pintarMaduracion();
@@ -784,18 +1046,20 @@ function pintarModelo() {
   })), { fmtRot: v => fmtP(v), fmtEje: v => fmtP(v), alto: 250, color: tok('--s3'), tope1: true });
 
   // Matriz de turno
-  const h = ['<thead><tr><th class="txt">Sede · origen</th>' +
+  const h = ['<thead><tr><th class="txt">Sede · modalidad · turno de origen</th>' +
     S.D.turnos.map(t => '<th>' + esc(t) + '</th>').join('') + '<th>n</th></tr></thead><tbody>'];
   S.D.sedes.forEach((sd, is) => {
-    S.D.turnos.forEach((t0, it) => {
-      const a = S.E.tuSede.get(is + '|' + it);
-      if (!a) return;
-      const s = a.reduce((x, y) => x + y, 0);
-      if (s <= 0) return;
-      h.push('<tr><td class="txt">' + esc(sd) + ' · ' + esc(t0) + '</td>' +
-        a.map((v, j) => '<td' + (j === it ? ' style="font-weight:680"' : '') + '>' +
-          (v / s > 0.0005 ? fmtP(v / s) : '<span class="mini">·</span>') + '</td>').join('') +
-        '<td class="mini">' + fmtN(s) + '</td></tr>');
+    S.D.modalidades.forEach((md, im) => {
+      S.D.turnos.forEach((t0, it) => {
+        const a = S.E.tuModa.get(is + '|' + im + '|' + it);
+        if (!a) return;
+        const s = a.reduce((x, y) => x + y, 0);
+        if (s <= 0.5) return;
+        h.push('<tr><td class="txt">' + esc(sd) + ' · ' + esc(md) + ' · ' + esc(t0) + '</td>' +
+          a.map((v, j) => '<td' + (j === it ? ' style="font-weight:680"' : '') + '>' +
+            (v / s > 0.0005 ? fmtP(v / s) : '<span class="mini">·</span>') + '</td>').join('') +
+          '<td class="mini">' + fmtN(s) + '</td></tr>');
+      });
     });
   });
   h.push('</tbody>');
@@ -922,7 +1186,8 @@ function iniciar() {
   $('#archivo').onchange = ev => { if (ev.target.files[0]) cargarArchivo(ev.target.files[0]); ev.target.value = ''; };
   ['#horizonte', '#confianza', '#lam', '#lamN', '#factorK'].forEach(s =>
     $(s).onchange = () => { actualizarPistas(); recalcular(); });
-  ['#escenarioVista', '#fPeriodo', '#fSede', '#fCarrera', '#fTurno', '#fFila', '#fCol'].forEach(s =>
+  ['#escenarioVista', '#fPeriodo', '#fSede', '#fCarrera', '#fModalidad', '#fTurno',
+    '#fFila', '#fCol'].forEach(s =>
     $(s).onchange = () => { pintarDetalle(); if (s === '#escenarioVista') pintarKpis(); });
 
   let t0;

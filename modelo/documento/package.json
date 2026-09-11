@@ -1,0 +1,12 @@
+{
+  "name": "documento-modelo-matricula",
+  "private": true,
+  "description": "Genera el documento Word del modelo de proyección de matrícula",
+  "scripts": {
+    "construir": "node doc_construir.js",
+    "validar": "python3 validate.py"
+  },
+  "dependencies": {
+    "docx": "^9.0.0"
+  }
+}

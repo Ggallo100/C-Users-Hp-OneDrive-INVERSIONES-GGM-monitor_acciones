@@ -217,6 +217,14 @@ function graficoApilado(sel, etiquetas, series, opts) {
         fmtN(tot[i]) + '</text>');
     }
   });
+  /* Separador entre lo observado y lo proyectado, cuando la serie empalma
+     ambos tramos: sin él no se distingue el dato del pronóstico. */
+  if (opts.desdeProy != null && opts.desdeProy > 0 && opts.desdeProy < etiquetas.length) {
+    const xs = (X(opts.desdeProy - 1) + X(opts.desdeProy)) / 2;
+    g.push('<line x1="' + xs + '" y1="' + M.t + '" x2="' + xs + '" y2="' + (M.t + ih) +
+      '" stroke="' + tok('--eje') + '" stroke-width="1" stroke-dasharray="3 3"/>');
+    g.push('<text class="ejeTxt" x="' + (xs + 5) + '" y="' + (M.t + 11) + '">proyección</text>');
+  }
   g.push('<line class="eje" x1="' + M.l + '" y1="' + (M.t + ih) + '" x2="' + (W - M.r) + '" y2="' + (M.t + ih) + '"/>');
   const salto = Math.ceil(etiquetas.length / Math.max(Math.floor(iw / 48), 1));
   etiquetas.forEach((et, i) => {
@@ -309,8 +317,11 @@ function graficoLineas(sel, etiquetas, series, opts) {
   const W = Math.max(cont.clientWidth || 500, 300), H = opts.alto || 240;
   const M = { t: 14, r: 16, b: 38, l: 54 };
   const iw = W - M.l - M.r, ih = H - M.t - M.b;
-  const todos = series.flatMap(s => s.v.filter(v => v != null));
-  const [y0, y1, paso] = escala(Math.min(...todos) * 0.96, Math.max(...todos) * 1.04, 4);
+  const todos = series.flatMap(s => s.v.filter(v => v != null && isFinite(v)));
+  let [y0, y1, paso] = escala(Math.min(...todos) * 0.96, Math.max(...todos) * 1.04, 4);
+  /* Una proporción no pasa del 100 %: sin este tope la escala «bonita» sube
+     hasta el 150 % y deja las curvas aplastadas en la mitad inferior. */
+  if (opts.tope100 && y1 > 100) { y1 = 100; paso = 25; if (y0 > 0) y0 = 0; }
   const X = i => M.l + (etiquetas.length === 1 ? iw / 2 : i * iw / (etiquetas.length - 1));
   const Y = v => M.t + ih - (v - y0) / (y1 - y0) * ih;
   const g = [];
@@ -320,13 +331,18 @@ function graficoLineas(sel, etiquetas, series, opts) {
       (opts.fmtEje ? opts.fmtEje(v) : fmtD(v)) + '</text>');
   }
   series.forEach(s => {
-    g.push('<polyline points="' + s.v.map((v, i) => X(i) + ',' + Y(v)).join(' ') +
+    /* Una serie puede no tener dato en todos los puntos (una modalidad que no
+       llega a los ciclos altos). Se dibuja sólo el tramo con dato en lugar de
+       forzar un cero que mentiría sobre la tasa. */
+    const pts = s.v.map((v, i) => ({ v, i })).filter(o => o.v != null && isFinite(o.v));
+    if (!pts.length) return;
+    g.push('<polyline points="' + pts.map(o => X(o.i) + ',' + Y(o.v)).join(' ') +
       '" fill="none" stroke="' + s.c + '" stroke-width="2"/>');
-    s.v.forEach((v, i) => g.push('<circle cx="' + X(i) + '" cy="' + Y(v) + '" r="3.4" fill="' + s.c +
+    pts.forEach(o => g.push('<circle cx="' + X(o.i) + '" cy="' + Y(o.v) + '" r="3.4" fill="' + s.c +
       '" stroke="' + tok('--sup') + '" stroke-width="1.5"/>'));
     /* Etiqueta directa al INICIO de la línea. Al final las series convergen y
        los rótulos se solapan; en el arranque están bien separadas. */
-    g.push('<text x="' + (X(0) + 8) + '" y="' + (Y(s.v[0]) - 7) +
+    g.push('<text x="' + (X(pts[0].i) + 8) + '" y="' + (Y(pts[0].v) - 7) +
       '" style="fill:' + s.c + ';font-size:10px;font-weight:600">' + esc(s.t) + '</text>');
   });
   if (opts.marcar != null) {

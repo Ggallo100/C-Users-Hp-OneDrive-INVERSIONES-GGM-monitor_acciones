@@ -5,7 +5,8 @@ import json
 import os
 
 AQUI = os.path.dirname(os.path.abspath(__file__))
-SALIDA = "/home/user/C-Users-Hp-OneDrive-INVERSIONES-GGM-monitor_acciones/modelo_proyeccion_matricula.html"
+RAIZ = os.path.dirname(AQUI)
+SALIDA = os.path.join(RAIZ, "modelo_proyeccion_matricula.html")
 
 
 def leer(n):

@@ -28,7 +28,7 @@ from estimar import (cargar, panel, stock_observado, nuevos_observados,
                      construir_parametros, varianza_proceso, Modelo,
                      agrega, epap, NIVELES, siguiente)
 
-LAM, LAM_N = 0.50, 0.30
+LAM, LAM_N = 0.65, 0.30
 NIVEL_CONF = 0.80
 
 
@@ -95,7 +95,8 @@ if __name__ == "__main__":
 
     # kappa que acerca la cobertura media de los niveles desagregados al nominal
     objetivo = NIVEL_CONF
-    niv_fino = ["Sede×Carrera", "Sede×Carrera×Ciclo", "Sede×Carrera×Ciclo×Turno"]
+    niv_fino = ["Sede×Carrera×Modalidad", "Sede×Carrera×Modalidad×Ciclo",
+                "Sede×Carrera×Modalidad×Ciclo×Turno"]
     err = (rk[niv_fino].mean(axis=1) - objetivo).abs()
     KAPPA = float(err.idxmin())
     print(f"\nkappa seleccionada: {KAPPA}"
@@ -148,10 +149,10 @@ if __name__ == "__main__":
 
     # Stock observado del histórico: arranque de la recursión
     par["stockHistorico"] = {
-        str(p): [[k[0], k[1], k[2], k[3], int(v)] for k, v in sorted(stock[p].items())]
+        str(p): [[k[0], k[1], k[2], k[3], k[4], int(v)] for k, v in sorted(stock[p].items())]
         for p in per}
     par["nuevosHistorico"] = {
-        str(p): [[k[0], k[1], k[2], int(v)] for k, v in sorted(nuevos.get(p, {}).items())]
+        str(p): [[k[0], k[1], k[2], k[3], int(v)] for k, v in sorted(nuevos.get(p, {}).items())]
         for p in per}
 
     print("\n=== EPAP por nivel y horizonte (%) ===")

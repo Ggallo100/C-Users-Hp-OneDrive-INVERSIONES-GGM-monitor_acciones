@@ -1,0 +1,7 @@
+node_modules/
+__pycache__/
+*.pyc
+modelo/fuente/descargas/
+modelo/fuente/capturas/
+modelo/documento/vista.html
+modelo/documento/*.docx

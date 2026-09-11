@@ -4,7 +4,7 @@ const { chromium } = require('playwright');
 const fs = require('fs');
 const path = require('path');
 
-const ARCHIVO = 'file:///home/user/C-Users-Hp-OneDrive-INVERSIONES-GGM-monitor_acciones/modelo_proyeccion_matricula.html';
+const ARCHIVO = 'file://' + path.resolve(__dirname, '..', '..', 'modelo_proyeccion_matricula.html');
 const CAPT = path.join(__dirname, 'capturas');
 
 (async () => {
@@ -36,7 +36,7 @@ const CAPT = path.join(__dirname, 'capturas');
     // ingresantes reflejados
     const nuevos = suma(P.nuevos.get(T0));
     let enCiclo1 = 0;
-    P.cen.get(T0).forEach((v, k) => { if (+k.split('|')[2] === 1) enCiclo1 += v; });
+    P.cen.get(T0).forEach((v, k) => { if (+k.split('|')[3] === 1) enCiclo1 += v; });
     return {
       periodos: P.periodos.map(rotuloPeriodo), cen, alt, baj, porSede, nuevos, enCiclo1,
       z: P.z, sigma: P.sigma, conf: P.conf,
@@ -46,6 +46,7 @@ const CAPT = path.join(__dirname, 'capturas');
       filasCeldas: document.querySelectorAll('#tbCeldas tbody tr').length,
       svgs: document.querySelectorAll('svg.gr').length,
       carreras: S.carreras.length, sedes: S.sedes.length,
+      modalidades: S.D.modalidades.length,
     };
   });
   console.log('\n--- estado ---');

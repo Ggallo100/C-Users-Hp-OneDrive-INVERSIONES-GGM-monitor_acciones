@@ -189,9 +189,16 @@ function kDirichlet(mat) {
 /**
  * Reagrega los conteos por periodo con ponderación de recencia lam^(tmax - t)
  * y construye todos los niveles de la escalera de contracción.
+ *
+ * El estado es (sede, carrera, modalidad, ciclo, turno). La modalidad se
+ * conserva entre semestres —el 99,4 % de los continuadores la mantiene—, así
+ * que no necesita matriz de transición propia; pero condiciona con fuerza la
+ * continuación, el avance de ciclo y el turno, y por eso entra en todas las
+ * tablas de conteo.
  */
 function estimar(D, lam, lamN, factorK) {
   const LAG = D.lagMax, ND = D.deltas.length, NT = D.turnos.length;
+  const NM = D.modalidades.length;
   const tmax = D.periodos.length - 1;
   const w = t => Math.pow(lam, tmax - t);
   const wN = t => Math.pow(lamN, tmax - t);
@@ -200,21 +207,23 @@ function estimar(D, lam, lamN, factorK) {
     for (let i = 0; i < largo; i++) a[i] += v[i] * mult;
   };
 
-  /* ---- continuación: n y k por rezago, en cuatro niveles ---- */
-  const celda = new Map(), porCarrera = new Map(), porCicloPar = new Map(), porCiclo = new Map();
+  /* ---- continuación: n y k por rezago, en cinco niveles ---- */
+  const celda = new Map(), porCarrera = new Map(), porModa = new Map(),
+    porCicloPar = new Map(), porCiclo = new Map();
   const glob = new Array(2 * LAG).fill(0);
   for (const f of D.cont) {
-    const [is, ic, ci, pa, ip] = f;
-    const v = f.slice(5), mult = w(ip);
-    suma(celda, is + '|' + ic + '|' + ci + '|' + pa, 2 * LAG, v, mult);
-    suma(porCarrera, ic + '|' + ci + '|' + pa, 2 * LAG, v, mult);
+    const [is, ic, im, ci, pa, ip] = f;
+    const v = f.slice(6), mult = w(ip);
+    suma(celda, is + '|' + ic + '|' + im + '|' + ci + '|' + pa, 2 * LAG, v, mult);
+    suma(porCarrera, ic + '|' + im + '|' + ci + '|' + pa, 2 * LAG, v, mult);
+    suma(porModa, im + '|' + ci + '|' + pa, 2 * LAG, v, mult);
     suma(porCicloPar, ci + '|' + pa, 2 * LAG, v, mult);
     suma(porCiclo, String(ci), 2 * LAG, v, mult);
     for (let i = 0; i < 2 * LAG; i++) glob[i] += v[i] * mult;
   }
-  const kCont = { celda: [], carrera: [], ciclopar: [], ciclo: [] };
+  const kCont = { celda: [], carrera: [], moda: [], ciclopar: [], ciclo: [] };
   for (let L = 0; L < LAG; L++) {
-    for (const [nom, m] of [['celda', celda], ['carrera', porCarrera],
+    for (const [nom, m] of [['celda', celda], ['carrera', porCarrera], ['moda', porModa],
     ['ciclopar', porCicloPar], ['ciclo', porCiclo]]) {
       const ex = [], en = [];
       m.forEach(a => { en.push(a[L]); ex.push(a[LAG + L]); });
@@ -224,56 +233,76 @@ function estimar(D, lam, lamN, factorK) {
   const contGlobal = [];
   for (let L = 0; L < LAG; L++) contGlobal.push(glob[LAG + L] / Math.max(glob[L], 1e-9));
 
-  /* ---- avance de ciclo ---- */
-  const avCelda = new Map(), avCiclo = new Map();
+  /* ---- avance de ciclo: celda(carrera,modalidad,ciclo) -> modalidad·ciclo -> ciclo ---- */
+  const avCelda = new Map(), avModa = new Map(), avCiclo = new Map();
   const avGlobal = new Array(ND).fill(0);
   for (const f of D.av) {
-    const [ic, ci, ip] = f, v = f.slice(3), mult = w(ip);
-    suma(avCelda, ic + '|' + ci, ND, v, mult);
+    const [ic, im, ci, ip] = f, v = f.slice(4), mult = w(ip);
+    suma(avCelda, ic + '|' + im + '|' + ci, ND, v, mult);
+    suma(avModa, im + '|' + ci, ND, v, mult);
     suma(avCiclo, String(ci), ND, v, mult);
     for (let i = 0; i < ND; i++) avGlobal[i] += v[i] * mult;
   }
   const kAvance = kDirichlet(Array.from(avCelda.values())) * factorK;
 
-  /* ---- transición de turno ---- */
-  const tuCelda = new Map(), tuSede = new Map();
+  /* ---- transición de turno: celda(sede,modalidad,ciclo,turno) -> sede·modalidad·turno -> sede·turno ---- */
+  const tuCelda = new Map(), tuModa = new Map(), tuSede = new Map();
   for (const f of D.tu) {
-    const [is, ci, it, ip] = f, v = f.slice(4), mult = w(ip);
-    suma(tuCelda, is + '|' + ci + '|' + it, NT, v, mult);
+    const [is, im, ci, it, ip] = f, v = f.slice(5), mult = w(ip);
+    suma(tuCelda, is + '|' + im + '|' + ci + '|' + it, NT, v, mult);
+    suma(tuModa, is + '|' + im + '|' + it, NT, v, mult);
     suma(tuSede, is + '|' + it, NT, v, mult);
   }
   const kTurno = kDirichlet(Array.from(tuCelda.values())) * factorK;
 
   /* ---- mezcla de turno de los ingresantes (recencia propia) ---- */
-  const ntCelda = new Map(), ntCarPar = new Map(), ntCar = new Map(),
-    ntSedePar = new Map(), ntSede = new Map();
+  const ntCelda = new Map(), ntCarModaPar = new Map(), ntCarModa = new Map(),
+    ntSedeModaPar = new Map(), ntSedeModa = new Map(), ntSede = new Map();
   const ntGlobal = new Array(NT).fill(0);
   for (const f of D.nt) {
-    const [is, ic, ci, pa, ip] = f, v = f.slice(5), mult = wN(ip);
-    suma(ntCelda, is + '|' + ic + '|' + ci + '|' + pa, NT, v, mult);
-    suma(ntCarPar, is + '|' + ic + '|' + pa, NT, v, mult);
-    suma(ntCar, is + '|' + ic, NT, v, mult);
-    suma(ntSedePar, is + '|' + pa, NT, v, mult);
+    const [is, ic, im, ci, pa, ip] = f, v = f.slice(6), mult = wN(ip);
+    suma(ntCelda, is + '|' + ic + '|' + im + '|' + ci + '|' + pa, NT, v, mult);
+    suma(ntCarModaPar, is + '|' + ic + '|' + im + '|' + pa, NT, v, mult);
+    suma(ntCarModa, is + '|' + ic + '|' + im, NT, v, mult);
+    suma(ntSedeModaPar, is + '|' + im + '|' + pa, NT, v, mult);
+    suma(ntSedeModa, is + '|' + im, NT, v, mult);
     suma(ntSede, String(is), NT, v, mult);
     for (let i = 0; i < NT; i++) ntGlobal[i] += v[i] * mult;
   }
-  // Sobre las celdas ya agregadas y ponderadas, igual que los demás niveles.
   const kNuevos = kDirichlet(Array.from(ntCelda.values())) * factorK;
 
+  /* ---- mezcla de modalidad de los ingresantes ---- */
+  const nmCelda = new Map(), nmCarPar = new Map(), nmCar = new Map(),
+    nmSedePar = new Map(), nmSede = new Map();
+  const nmGlobal = new Array(NM).fill(0);
+  for (const f of D.nm) {
+    const [is, ic, ci, pa, ip] = f, v = f.slice(5), mult = wN(ip);
+    suma(nmCelda, is + '|' + ic + '|' + ci + '|' + pa, NM, v, mult);
+    suma(nmCarPar, is + '|' + ic + '|' + pa, NM, v, mult);
+    suma(nmCar, is + '|' + ic, NM, v, mult);
+    suma(nmSedePar, is + '|' + pa, NM, v, mult);
+    suma(nmSede, String(is), NM, v, mult);
+    for (let i = 0; i < NM; i++) nmGlobal[i] += v[i] * mult;
+  }
+  const kModalidad = kDirichlet(Array.from(nmCelda.values())) * factorK;
+
   return {
-    D, lam, lamN, factorK, LAG, ND, NT,
-    celda, porCarrera, porCicloPar, porCiclo, contGlobal, kCont,
-    avCelda, avCiclo, avGlobal, kAvance,
-    tuCelda, tuSede, kTurno,
-    ntCelda, ntCarPar, ntCar, ntSedePar, ntSede, ntGlobal, kNuevos,
+    D, lam, lamN, factorK, LAG, ND, NT, NM,
+    celda, porCarrera, porModa, porCicloPar, porCiclo, contGlobal, kCont,
+    avCelda, avModa, avCiclo, avGlobal, kAvance,
+    tuCelda, tuModa, tuSede, kTurno,
+    ntCelda, ntCarModaPar, ntCarModa, ntSedeModaPar, ntSedeModa, ntSede, ntGlobal, kNuevos,
+    nmCelda, nmCarPar, nmCar, nmSedePar, nmSede, nmGlobal, kModalidad,
     // Apertura por índice de sede; la interfaz la amplía con las sedes nuevas
     // que aparezcan en el archivo de ingresantes.
     apertura: D.sedes.map(s2 => D.sedeApertura[s2] || { enMaduracion: false }),
     nSedes: D.sedes.length,
     iS: new Map(D.sedes.map((v, i) => [v, i])),
     iC: new Map(D.carreras.map((v, i) => [v, i])),
+    iM: new Map(D.modalidades.map((v, i) => [v, i])),
     iT: new Map(D.turnos.map((v, i) => [v, i])),
-    cacheQ: new Map(), cacheAv: new Map(), cacheTu: new Map(), cacheNt: new Map(),
+    cacheQ: new Map(), cacheAv: new Map(), cacheTu: new Map(),
+    cacheNt: new Map(), cacheNm: new Map(),
   };
 }
 
@@ -281,20 +310,25 @@ function estimar(D, lam, lamN, factorK) {
 
 /**
  * Tasa de continuación con rezago L y su tamaño muestral efectivo.
- * Escalera: global -> ciclo -> ciclo·paridad -> carrera·ciclo·paridad -> celda.
- * Una carrera o sede sin historia propia se detiene en el último nivel con
- * evidencia, que es lo que permite proyectar programas nuevos.
+ * Escalera: global -> ciclo -> ciclo·paridad -> modalidad·ciclo·paridad
+ * -> carrera·modalidad·ciclo·paridad -> celda.
+ * La modalidad entra justo después de la estructura por ciclo porque es el
+ * segundo factor en importancia: en el ciclo 1 la continuación va del 42 % a
+ * distancia al 71 % presencial. Una carrera o sede sin historia propia se
+ * detiene en el último nivel con evidencia, que es lo que permite proyectar
+ * programas y sedes nuevos.
  */
-function tasaQ(E, is, ic, ciclo, par, L) {
-  const ck = is + '' + ic + '' + ciclo + '' + par + '' + L;
+function tasaQ(E, is, ic, im, ciclo, par, L) {
+  const ck = is + ',' + ic + ',' + im + ',' + ciclo + ',' + par + ',' + L;
   const hit = E.cacheQ.get(ck); if (hit) return hit;
   const i = L - 1, LAG = E.LAG;
   const cl = Math.min(ciclo, E.D.cicloMax);
   const cadena = [
     [E.porCiclo.get(String(cl)), E.kCont.ciclo[i]],
     [E.porCicloPar.get(cl + '|' + par), E.kCont.ciclopar[i]],
-    [E.porCarrera.get(ic + '|' + cl + '|' + par), E.kCont.carrera[i]],
-    [E.celda.get(is + '|' + ic + '|' + cl + '|' + par), E.kCont.celda[i]],
+    [E.porModa.get(im + '|' + cl + '|' + par), E.kCont.moda[i]],
+    [E.porCarrera.get(ic + '|' + im + '|' + cl + '|' + par), E.kCont.carrera[i]],
+    [E.celda.get(is + '|' + ic + '|' + im + '|' + cl + '|' + par), E.kCont.celda[i]],
   ];
   let est = E.contGlobal[i], nef = 0;
   for (const [a, k] of cadena) {
@@ -321,30 +355,23 @@ function comp(celda, padre, k) {
   return [s > 0 ? v.map(x => x / s) : pad, sc + k];
 }
 
-function avanceDe(E, ic, ciclo) {
-  const ck = ic + '' + ciclo;
-  const hit = E.cacheAv.get(ck); if (hit) return hit;
-  const cl = Math.min(ciclo, E.D.cicloMax);
-  const pad = E.avCiclo.get(String(cl)) || E.avGlobal;
-  const r = comp(E.avCelda.get(ic + '|' + cl), pad, E.kAvance);
-  E.cacheAv.set(ck, r);
-  return r;
-}
-
-function turnoDe(E, is, ciclo, it) {
-  const ck = is + '' + ciclo + '' + it;
-  const hit = E.cacheTu.get(ck); if (hit) return hit;
-  const cl = Math.min(ciclo, E.D.cicloMax);
-  const pad = E.tuSede.get(is + '|' + it);
-  let r;
-  if (!pad) {                       // turno sin historia en la sede: permanece
-    const v = new Array(E.NT).fill(0); v[it] = 1;
-    r = [v, 1e6];
-  } else {
-    r = comp(E.tuCelda.get(is + '|' + cl + '|' + it), pad, E.kTurno);
+/**
+ * Contracción en cascada por una lista de niveles, del más agregado al más
+ * fino. Se detiene en el último nivel que tenga evidencia, y devuelve además
+ * el nombre de ese nivel para poder informarlo en la interfaz.
+ */
+function cascada(cadena, raiz, k) {
+  let sg = 0; for (const x of raiz) sg += x;
+  let v = sg > 0 ? raiz.map(x => x / sg) : raiz.map(() => 1 / raiz.length);
+  let nef = k, nivel = 'global';
+  for (const [nombre, cel] of cadena) {
+    if (!cel) continue;
+    let s = 0; for (const x of cel) s += x;
+    if (s <= 0) continue;
+    const r = comp(cel, v, k);
+    v = r[0]; nef = r[1]; nivel = nombre;
   }
-  E.cacheTu.set(ck, r);
-  return r;
+  return [v, nef, nivel];
 }
 
 /**
@@ -366,37 +393,79 @@ function topeSede(E, is, T) {
   return Math.max(0, ap.cicloBase + (indicePeriodo(T) - indicePeriodo(ap.inicio)));
 }
 
+function avanceDe(E, ic, im, ciclo) {
+  const ck = ic + ',' + im + ',' + ciclo;
+  const hit = E.cacheAv.get(ck); if (hit) return hit;
+  const cl = Math.min(ciclo, E.D.cicloMax);
+  const raiz = E.avCiclo.get(String(cl)) || E.avGlobal;
+  const r = cascada([
+    ['modalidad', E.avModa.get(im + '|' + cl)],
+    ['celda', E.avCelda.get(ic + '|' + im + '|' + cl)],
+  ], raiz, E.kAvance);
+  E.cacheAv.set(ck, r);
+  return r;
+}
+
+function turnoDe(E, is, im, ciclo, it) {
+  const ck = is + ',' + im + ',' + ciclo + ',' + it;
+  const hit = E.cacheTu.get(ck); if (hit) return hit;
+  const cl = Math.min(ciclo, E.D.cicloMax);
+  const raiz = E.tuSede.get(is + '|' + it);
+  let r;
+  if (!raiz) {                      // turno sin historia en la sede: permanece
+    const v = new Array(E.NT).fill(0); v[it] = 1;
+    r = [v, 1e6, 'sin evidencia'];
+  } else {
+    r = cascada([
+      ['sede·modalidad', E.tuModa.get(is + '|' + im + '|' + it)],
+      ['celda', E.tuCelda.get(is + '|' + im + '|' + cl + '|' + it)],
+    ], raiz, E.kTurno);
+  }
+  E.cacheTu.set(ck, r);
+  return r;
+}
+
 /**
- * Reparto estimado de los ingresantes por turno.
- * Escalera: global -> sede -> sede·paridad -> sede·carrera -> sede·carrera·par
- * -> celda. Un programa NUEVO, sin historia propia, se detiene en el nivel de
- * sede, que sí la tiene: de ahí hereda su reparto de turno.
+ * Reparto estimado de los ingresantes por turno. La modalidad entra pronto en
+ * la cascada porque casi lo determina: a distancia es turno noche en un 90 %.
+ * Un programa NUEVO, sin historia propia, se detiene en el nivel de sede y
+ * modalidad, que sí la tiene.
  */
-function mezclaNuevos(E, is, ic, ciclo, par) {
-  const ck = is + '' + ic + '' + ciclo + '' + par;
+function mezclaNuevos(E, is, ic, im, ciclo, par) {
+  const ck = is + ',' + ic + ',' + im + ',' + ciclo + ',' + par;
   const hit = E.cacheNt.get(ck); if (hit) return hit;
   const cl = Math.min(ciclo, E.D.cicloMax);
   const k = E.kNuevos;
-  const cadena = [
-    E.ntSede.get(String(is)),
-    E.ntSedePar.get(is + '|' + par),
-    E.ntCar.get(is + '|' + ic),
-    E.ntCarPar.get(is + '|' + ic + '|' + par),
-    E.ntCelda.get(is + '|' + ic + '|' + cl + '|' + par),
-  ];
-  let sg = 0; for (const x of E.ntGlobal) sg += x;
-  let v = sg > 0 ? E.ntGlobal.map(x => x / sg) : E.ntGlobal.map(() => 1 / E.NT);
-  let nef = k, nivel = 'global';
-  const nombres = ['sede', 'sede·paridad', 'sede·carrera', 'sede·carrera·paridad', 'celda'];
-  cadena.forEach((a, idx) => {
-    if (!a) return;
-    let s = 0; for (const x of a) s += x;
-    if (s <= 0) return;
-    const r = comp(a, v, k);
-    v = r[0]; nef = r[1]; nivel = nombres[idx];
-  });
-  const r = [v, nef, nivel];
+  const r = cascada([
+    ['sede', E.ntSede.get(String(is))],
+    ['sede·modalidad', E.ntSedeModa.get(is + '|' + im)],
+    ['sede·modalidad·paridad', E.ntSedeModaPar.get(is + '|' + im + '|' + par)],
+    ['sede·carrera·modalidad', E.ntCarModa.get(is + '|' + ic + '|' + im)],
+    ['sede·carrera·modalidad·paridad', E.ntCarModaPar.get(is + '|' + ic + '|' + im + '|' + par)],
+    ['celda', E.ntCelda.get(is + '|' + ic + '|' + im + '|' + cl + '|' + par)],
+  ], E.ntGlobal, k);
   E.cacheNt.set(ck, r);
+  return r;
+}
+
+/**
+ * Reparto estimado de los ingresantes por modalidad, para cuando el archivo de
+ * entrada no la declara. La paridad condiciona porque la mezcla oscila mucho
+ * entre semestres: en el segundo la modalidad a distancia pesa bastante más.
+ */
+function mezclaModalidad(E, is, ic, ciclo, par) {
+  const ck = is + ',' + ic + ',' + ciclo + ',' + par;
+  const hit = E.cacheNm.get(ck); if (hit) return hit;
+  const cl = Math.min(ciclo, E.D.cicloMax);
+  const k = E.kModalidad;
+  const r = cascada([
+    ['sede', E.nmSede.get(String(is))],
+    ['sede·paridad', E.nmSedePar.get(is + '|' + par)],
+    ['sede·carrera', E.nmCar.get(is + '|' + ic)],
+    ['sede·carrera·paridad', E.nmCarPar.get(is + '|' + ic + '|' + par)],
+    ['celda', E.nmCelda.get(is + '|' + ic + '|' + cl + '|' + par)],
+  ], E.nmGlobal, k);
+  E.cacheNm.set(ck, r);
   return r;
 }
 
@@ -407,8 +476,8 @@ function mezclaNuevos(E, is, ic, ciclo, par) {
 /**
  * Proyecta la matrícula periodo a periodo.
  *
- *   stock0   Map periodo -> Map "is|ic|ciclo|it" -> valor  (historia inicial)
- *   nuevos   Map periodo -> Map "is|ic|ciclo"    -> cantidad
+ *   stock0   Map periodo -> Map "is|ic|im|ciclo|it" -> valor  (historia inicial)
+ *   nuevos   Map periodo -> Map "is|ic|im|ciclo"    -> cantidad
  *   periodos lista ordenada de semestres a proyectar
  *   shock    desplazamiento sistémico en escala logit sobre la continuación
  *   conVar   acumula además la varianza independiente por celda
@@ -445,15 +514,15 @@ function proyectar(E, stock0, nuevos, periodos, shock, conVar) {
       st.forEach((val, clave) => {
         if (val <= 0) return;
         const pz = clave.split('|');
-        const is = +pz[0], ic = +pz[1], ciclo = +pz[2], it = +pz[3];
-        let [qq, nq] = tasaQ(E, is, ic, ciclo, parO, L);
+        const is = +pz[0], ic = +pz[1], im = +pz[2], ciclo = +pz[3], it = +pz[4];
+        let [qq, nq] = tasaQ(E, is, ic, im, ciclo, parO, L);
         if (shock) {
           const lo = Math.log(qq / (1 - qq)) + shock;
           qq = 1 / (1 + Math.exp(-lo));
         }
         if (qq <= 0) return;
-        const [av, na] = avanceDe(E, ic, ciclo);
-        const [tt, nt] = turnoDe(E, is, ciclo, it);
+        const [av, na] = avanceDe(E, ic, im, ciclo);
+        const [tt, nt] = turnoDe(E, is, im, ciclo, it);
         const tope = Math.min(planPorIc[ic] || D.planDefecto, topeMaduracion[is]);
         const vx = conVar ? (vr.get(clave) || 0) : 0;
         for (let di = 0; di < ND; di++) {
@@ -464,7 +533,7 @@ function proyectar(E, stock0, nuevos, periodos, shock, conVar) {
           for (let ti = 0; ti < NT; ti++) {
             if (tt[ti] <= 0) continue;
             const phi = qq * av[di] * tt[ti];
-            const k2 = is + '|' + ic + '|' + c2 + '|' + ti;
+            const k2 = is + '|' + ic + '|' + im + '|' + c2 + '|' + ti;
             dest.set(k2, (dest.get(k2) || 0) + val * phi);
             if (conVar) {
               const vReal = val * phi * (1 - phi);
@@ -480,14 +549,14 @@ function proyectar(E, stock0, nuevos, periodos, shock, conVar) {
     if (nv) nv.forEach((cant, clave) => {
       if (cant <= 0) return;
       const pz = clave.split('|');
-      const is = +pz[0], ic = +pz[1];
+      const is = +pz[0], ic = +pz[1], im = +pz[2];
       // El ingresante tampoco puede entrar a un ciclo que la sede aún no
       // imparte ni que exceda el plan de la carrera.
-      const ciclo = Math.min(+pz[2], planPorIc[ic] || D.planDefecto, topeMaduracion[is]);
-      const [mz, nm] = mezclaNuevos(E, is, ic, ciclo, par);
+      const ciclo = Math.min(+pz[3], planPorIc[ic] || D.planDefecto, topeMaduracion[is]);
+      const [mz, nm] = mezclaNuevos(E, is, ic, im, ciclo, par);
       for (let ti = 0; ti < NT; ti++) {
         if (mz[ti] <= 0) continue;
-        const k2 = is + '|' + ic + '|' + ciclo + '|' + ti;
+        const k2 = is + '|' + ic + '|' + im + '|' + ciclo + '|' + ti;
         dest.set(k2, (dest.get(k2) || 0) + cant * mz[ti]);
         if (conVar) {
           dvar.set(k2, (dvar.get(k2) || 0)
