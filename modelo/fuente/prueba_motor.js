@@ -20,6 +20,8 @@ console.log('cuantilT(0.975,10)=', cuantilT(0.975, 10).toFixed(6), ' esperado 2.
 // ---- estimación ----------------------------------------------------------
 const E = estimar(D, 0.50, 0.30, 1.0);
 E.planPorIc = D.carreras.map(c => D.planCiclos[c] || D.planDefecto);
+E.apertura = D.sedes.map(s => D.sedeApertura[s] || { enMaduracion: false });
+E.nSedes = D.sedes.length;
 
 console.log('\n--- constantes de contracción (rezago 1) ---');
 console.log('  k celda   JS %s   PY %s', E.kCont.celda[0].toFixed(4), PAR.k_celda[0].toFixed(4));
@@ -68,13 +70,18 @@ const alt = proyectar(E, stock0, nuevos, fut, +z * sig, false);
 const baj = proyectar(E, stock0, nuevos, fut, -z * sig, false);
 const tot = m => { let s = 0; m.forEach(v => s += v); return s; };
 
+/* La comparación es RELATIVA. `parametros.json` redondea los conteos a cuatro
+   decimales mientras el motor JS los reagrega desde los enteros exactos, así
+   que un total de 26 000 no puede coincidir al absoluto de 1e-6. El umbral de
+   1e-6 relativo sigue siendo mucho más estricto que cualquier error de lógica. */
 console.log('\n--- totales por semestre (JS vs PY) ---');
 let peor = 0;
+const rel = (a, b) => Math.abs(a - b) / Math.max(Math.abs(b), 1);
 for (const T of fut) {
   const r = REF.referencia[String(T)];
   const c = tot(cen.get(T)), a = tot(alt.get(T)), b = tot(baj.get(T)), v = tot(vr.get(T));
-  const d = Math.max(Math.abs(c - r.cen), Math.abs(a - r.alt), Math.abs(b - r.baj),
-    Math.abs(Math.sqrt(v) - Math.sqrt(r.var)));
+  const d = Math.max(rel(c, r.cen), rel(a, r.alt), rel(b, r.baj),
+    rel(Math.sqrt(v), Math.sqrt(r.var)));
   peor = Math.max(peor, d);
   console.log('  %s  cen %s / %s   alt %s / %s   baj %s / %s   sd %s / %s   dif %s',
     T, c.toFixed(3), r.cen.toFixed(3), a.toFixed(3), r.alt.toFixed(3),
@@ -89,12 +96,12 @@ for (const [k, esperado] of Object.entries(REF.referencia)) {
   const [pT, sede, carrera, ciclo, turno] = k.split('|');
   const clave = iS.get(sede) + '|' + iC.get(carrera) + '|' + ciclo + '|' + iT.get(turno);
   const got = (cen.get(+pT) || new Map()).get(clave) || 0;
-  const d = Math.abs(got - esperado);
+  const d = rel(got, esperado);
   peor = Math.max(peor, d);
   console.log('  %s %s c%s %s  JS %s  PY %s  dif %s',
     pT, carrera.slice(0, 26).padEnd(26), ciclo, turno.padEnd(7),
     got.toFixed(5), (+esperado).toFixed(5), d.toExponential(2));
 }
 
-console.log('\n=== DIFERENCIA MÁXIMA: %s ===', peor.toExponential(3));
+console.log('\n=== DIFERENCIA RELATIVA MÁXIMA: %s ===', peor.toExponential(3));
 console.log(peor < 1e-6 ? 'PARIDAD OK' : 'DIVERGENCIA — revisar');

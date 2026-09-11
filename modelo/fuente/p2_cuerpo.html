@@ -212,6 +212,27 @@
     <dl class="par" id="parModelo"></dl>
   </div>
 
+  <div class="tarjeta" id="tjMaduracion">
+    <header><h2>Maduración de sede</h2><span class="mini">despliegue progresivo del plan</span></header>
+    <p class="txt">
+      Una sede que acaba de abrir no puede tener estudiantes en cualquier ciclo:
+      despliega su plan de estudios semestre a semestre. En el semestre de
+      apertura sólo existe el ciclo 1; un semestre después, el 2; y así
+      sucesivamente. El modelo aplica ese tope tanto al avance de los
+      continuadores —la matriz de avance permite saltos de +2 y +3 que se
+      recortan— como a los ingresantes que el archivo declare en ciclos
+      superiores.
+    </p>
+    <p class="txt">
+      La apertura se detecta del propio histórico: si el ciclo máximo del primer
+      semestre observado de una sede es 1 o 2, la sede arrancó ahí. Una sede con
+      el plan completo desde su primer registro es anterior a la ventana de datos
+      y no se le aplica tope. Las sedes que aparecen por primera vez en el archivo
+      de ingresantes se tratan como aperturas en ese semestre.
+    </p>
+    <div class="envoltura"><table id="tbMaduracion"></table></div>
+  </div>
+
   <div class="rejilla r2" id="tjContinuacion">
     <div class="tarjeta">
       <header><h2>Tasa de continuación por ciclo</h2></header>

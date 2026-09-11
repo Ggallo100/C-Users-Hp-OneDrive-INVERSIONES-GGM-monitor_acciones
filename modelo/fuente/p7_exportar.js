@@ -179,6 +179,27 @@ function exportarExcel() {
     r5.push([sd, t0].concat(a.map(v => PC(v / s))).concat([N0(s)]));
   }));
   r5.push([]);
+  r5.push([TT('Maduración de sede · ciclo máximo ofertable')]);
+  r5.push(['Una sede recién abierta despliega su plan semestre a semestre: en el de apertura ' +
+    'sólo existe el ciclo 1, un semestre después el 2, y así. El tope se aplica al avance de los ' +
+    'continuadores y a los ingresantes declarados en ciclos superiores.']);
+  r5.push(['Sede', 'Semestre de apertura', 'Ciclo base', 'Origen del dato']
+    .concat(P.periodos.slice(0, 12).map(rotuloPeriodo)).map(H));
+  S.sedes.forEach((nom, is) => {
+    const ap = S.aperturaPorIs[is];
+    const enMad = ap && ap.enMaduracion;
+    r5.push([nom,
+      enMad ? rotuloPeriodo(ap.inicio) : 'Anterior a la base',
+      enMad ? ap.cicloBase : '',
+      !enMad ? 'Sede consolidada: sin tope'
+        : ap.declarada ? 'Declarada en el archivo de ingresantes' : 'Inferida del histórico']
+      .concat(P.periodos.slice(0, 12).map(T => {
+        const t = topeCicloSede(is, T);
+        return t >= 1e5 ? 'sin tope' : t <= 0 ? 'no opera' : Math.min(t, S.D.cicloMax);
+      })));
+  });
+
+  r5.push([]);
   r5.push([TT('Ciclos del plan por carrera')]);
   r5.push(['Carrera', 'Ciclos del plan', 'Origen'].map(H));
   S.carreras.forEach((c, i) => r5.push([c, S.planPorIc[i],
@@ -263,12 +284,23 @@ function exportarExcel() {
     ['de su ciclo y el reparto de turno de su sede. Es el mismo mecanismo de contracción, sin'],
     ['reglas especiales. Si el plan no dura ' + S.D.planDefecto + ' ciclos, se declara en la columna CiclosPlan.'],
     [],
-    [H('6. Reparto de los ingresantes por turno')],
+    [H('6. Maduración de sede')],
+    ['Una sede que abre no puede tener estudiantes en cualquier ciclo: despliega su plan de'],
+    ['estudios semestre a semestre. En el semestre de apertura sólo existe el ciclo 1, un'],
+    ['semestre después el 2, y así sucesivamente. El modelo aplica ese tope al avance de los'],
+    ['continuadores (la matriz de avance permite saltos de +2 y +3, que se recortan) y a los'],
+    ['ingresantes que el archivo declare en ciclos que la sede aún no imparte.'],
+    ['La apertura se detecta del histórico: si el ciclo máximo del primer semestre observado de'],
+    ['una sede es 1 o 2, la sede arrancó ahí. Una sede con el plan completo desde su primer'],
+    ['registro es anterior a la ventana de datos y no recibe tope. Las sedes que aparecen por'],
+    ['primera vez en el archivo de ingresantes se tratan como aperturas en ese semestre.'],
+    [],
+    [H('7. Reparto de los ingresantes por turno')],
     ['El archivo de entrada no declara el turno. Se estima con una composición multinomial'],
     ['contraída por niveles y ponderada por recencia, porque la mezcla de turno está en deriva'],
     ['pronunciada en el histórico. La estimación es determinista y reproducible.'],
     [],
-    [H('7. Escenarios frente a intervalo de predicción')],
+    [H('8. Escenarios frente a intervalo de predicción')],
     ['Los tres ESCENARIOS aplican un desplazamiento sistémico común en escala logit a la tasa'],
     ['de continuación, de ±z·σ. Son estados del mundo coherentes: el total de cada escenario'],
     ['es exactamente la suma de sus celdas, así que sirven para planificar capacidad.'],
@@ -276,13 +308,13 @@ function exportarExcel() {
     ['error de parámetro y varianza propagada). No es aditivo entre celdas, pero es el que'],
     ['responde a la pregunta de dónde caerá el dato observado.'],
     [],
-    [H('8. Validación')],
+    [H('9. Validación')],
     ['Backtesting de origen móvil: se reestima con la información disponible hasta cada semestre'],
     ['de corte y se proyecta el resto, comparando con lo efectivamente observado. Los resultados'],
     ['están en la hoja «Validación». La ponderación de recencia λ se eligió por este mismo'],
     ['procedimiento, no a juicio.'],
     [],
-    [H('9. Advertencias')],
+    [H('10. Advertencias')],
     ['· La proyección es condicional al archivo de ingresantes: no prevé la admisión.'],
     ['· La precisión relativa se degrada al desagregar; en celdas de pocos estudiantes conviene'],
     ['  leer el intervalo de predicción, no sólo el punto.'],

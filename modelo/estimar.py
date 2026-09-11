@@ -336,9 +336,20 @@ def construir_parametros(b, per, hasta=None, lam=0.50, lam_n=0.30):
                 tope = max(10, max(altos) + 1)
         plan[c] = int(min(tope, ciclo_max))
 
+    # Apertura de sede: el ciclo máximo de su primer semestre observado revela
+    # si la sede arrancó en la ventana de datos o es anterior a ella.
+    apertura = {}
+    for sede in sedes:
+        sub = bb[bb["Sede"] == sede]
+        ini = int(sub["Periodo_real"].min())
+        base = int(sub[sub["Periodo_real"] == ini]["Ciclo"].max())
+        apertura[sede] = {"inicio": ini, "cicloBase": base,
+                          "enMaduracion": bool(base <= 2)}
+
     return {
         "periodos": per_u, "turnos": turnos, "sedes": sedes, "carreras": carreras,
         "cicloMax": ciclo_max, "planCiclos": plan, "planDefecto": 10,
+        "sedeApertura": apertura,
         "deltas": DELTAS, "lagMax": LAG_MAX, "lambda": lam, "lambdaNuevos": lam_n,
         "cont_celda": cont_celda,
         "cont_carrera": a_dict(niv["carrera"]),
@@ -371,6 +382,12 @@ def anterior(periodo, L):
     for _ in range(L):
         a, s = (a - 1, 2) if s == 1 else (a, 1)
     return a * 100 + s
+
+
+def indice_periodo(periodo):
+    """Posición absoluta del semestre en la recta temporal: 2023-I -> 4046."""
+    a, sem = divmod(periodo, 100)
+    return a * 2 + (sem - 1)
 
 
 def siguiente(periodo, L=1):
@@ -429,6 +446,26 @@ class Modelo:
         v = (c + k * pad) / (c.sum() + k)
         s = v.sum()
         return (v / s if s > 0 else pad), c.sum() + k
+
+    def tope_sede(self, sede, T):
+        """
+        Ciclo máximo que una sede puede ofrecer en el semestre T.
+
+        Una sede recién abierta despliega su plan de estudios semestre a
+        semestre: en el de apertura sólo existe el ciclo 1, un semestre después
+        el 2, y así sucesivamente. Sin este tope la proyección colocaría
+        estudiantes en ciclos que la sede todavía no imparte, porque la matriz
+        de avance permite saltos de +2 y +3 y el archivo de ingresantes puede
+        declarar traslados a ciclos superiores.
+
+        Las sedes consolidadas devuelven un tope inoperante.
+        """
+        ap = self.p.get("sedeApertura", {}).get(sede)
+        if not ap or not ap.get("enMaduracion"):
+            return 10 ** 6
+        # Antes de la apertura el tope sería negativo; 0 expresa que la sede
+        # aún no ofrece ningún ciclo.
+        return max(0, ap["cicloBase"] + (indice_periodo(T) - indice_periodo(ap["inicio"])))
 
     def avance(self, carrera, ciclo):
         p = self.p
@@ -516,7 +553,8 @@ class Modelo:
                         continue
                     av, na = self.avance(carrera, ciclo)
                     tt, nt = self.turno_trans(sede, ciclo, turno)
-                    tope = p["planCiclos"].get(carrera, p["planDefecto"])
+                    tope = min(p["planCiclos"].get(carrera, p["planDefecto"]),
+                               self.tope_sede(sede, T))
                     vx = vr.get((sede, carrera, ciclo, turno), 0.0)
                     for di, d in enumerate(DELTAS):
                         if av[di] <= 0:
@@ -538,6 +576,10 @@ class Modelo:
             for (sede, carrera, ciclo), cant in nuevos.get(T, {}).items():
                 if cant <= 0:
                     continue
+                # El ingresante tampoco puede entrar a un ciclo que la sede aún
+                # no imparte ni que exceda el plan de la carrera.
+                ciclo = min(ciclo, p["planCiclos"].get(carrera, p["planDefecto"]),
+                            self.tope_sede(sede, T))
                 mz, nm = self.mezcla_nuevos(sede, carrera, ciclo, parid)
                 for ti, t2 in enumerate(self.turnos):
                     if mz[ti] <= 0:

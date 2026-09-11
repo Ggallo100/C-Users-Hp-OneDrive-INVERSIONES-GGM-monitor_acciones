@@ -73,6 +73,22 @@ def compactar():
     filas_nu = [[idx[p], iS[k[0]], iC[k[1]], k[2], int(v)]
                 for p in per for k, v in sorted(nu.get(p, {}).items())]
 
+    # ---- apertura de sede -------------------------------------------------
+    # Una sede que acaba de abrir sólo puede ofrecer los ciclos que le ha dado
+    # tiempo a desplegar: en su primer semestre el ciclo 1, un semestre después
+    # el 2, y así. Se detecta comparando el ciclo máximo de su primer semestre
+    # observado: si es pequeño, la sede arrancó ahí; si ya tenía el plan
+    # completo, la sede es anterior a la ventana de datos y no está madurando.
+    apertura = {}
+    for sede in sedes:
+        sub = b[b["Sede"] == sede]
+        ini = int(sub["Periodo_real"].min())
+        base = int(sub[sub["Periodo_real"] == ini]["Ciclo"].max())
+        apertura[sede] = {
+            "inicio": ini, "cicloBase": base,
+            "enMaduracion": bool(base <= 2),
+        }
+
     # ---- longitud de plan -------------------------------------------------
     cc = (b[b["t"] < nper - 1].assign(cont=lambda d: (d["rezago"] == 1).astype(int))
           .groupby(["Carrera", "Ciclo"])["cont"].agg(["mean", "count"]))
@@ -93,6 +109,7 @@ def compactar():
         "deltas": DELTAS, "lagMax": LAG_MAX,
         "cicloMax": int(b["Ciclo"].max()),
         "planCiclos": plan, "planDefecto": 10,
+        "sedeApertura": apertura,
         "cont": filas_cont, "av": filas_av, "tu": filas_tu, "nt": filas_nt,
         "stock": filas_st, "nuevos": filas_nu,
         "varianza": varianza_proceso(b, nper),

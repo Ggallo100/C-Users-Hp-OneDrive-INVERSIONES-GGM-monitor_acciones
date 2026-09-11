@@ -33,6 +33,11 @@ function leerPeriodo(txt) {
   return NaN;
 }
 
+/** Posición absoluta del semestre en la recta temporal: 2023-I -> 4046. */
+function indicePeriodo(p) {
+  return Math.floor(p / 100) * 2 + (p % 100 - 1);
+}
+
 /** Desplaza un semestre académico L posiciones (positivo o negativo). */
 function moverPeriodo(p, L) {
   let a = Math.floor(p / 100), s = p % 100;
@@ -261,6 +266,10 @@ function estimar(D, lam, lamN, factorK) {
     avCelda, avCiclo, avGlobal, kAvance,
     tuCelda, tuSede, kTurno,
     ntCelda, ntCarPar, ntCar, ntSedePar, ntSede, ntGlobal, kNuevos,
+    // Apertura por índice de sede; la interfaz la amplía con las sedes nuevas
+    // que aparezcan en el archivo de ingresantes.
+    apertura: D.sedes.map(s2 => D.sedeApertura[s2] || { enMaduracion: false }),
+    nSedes: D.sedes.length,
     iS: new Map(D.sedes.map((v, i) => [v, i])),
     iC: new Map(D.carreras.map((v, i) => [v, i])),
     iT: new Map(D.turnos.map((v, i) => [v, i])),
@@ -339,6 +348,25 @@ function turnoDe(E, is, ciclo, it) {
 }
 
 /**
+ * Ciclo máximo que una sede puede ofrecer en el semestre T.
+ *
+ * Una sede recién abierta despliega su plan semestre a semestre: en el de
+ * apertura sólo existe el ciclo 1, un semestre después el 2, y así. Sin este
+ * tope la proyección colocaría estudiantes en ciclos que la sede todavía no
+ * imparte, porque la matriz de avance permite saltos de +2 y +3 y el archivo
+ * de ingresantes puede declarar traslados a ciclos superiores.
+ *
+ * Las sedes consolidadas devuelven un tope inoperante.
+ */
+function topeSede(E, is, T) {
+  const ap = E.apertura && E.apertura[is];
+  if (!ap || !ap.enMaduracion) return 1e6;
+  // Antes de la apertura el tope sería negativo; 0 expresa que la sede aún no
+  // ofrece ningún ciclo, que es lo correcto y además evita ciclos absurdos.
+  return Math.max(0, ap.cicloBase + (indicePeriodo(T) - indicePeriodo(ap.inicio)));
+}
+
+/**
  * Reparto estimado de los ingresantes por turno.
  * Escalera: global -> sede -> sede·paridad -> sede·carrera -> sede·carrera·par
  * -> celda. Un programa NUEVO, sin historia propia, se detiene en el nivel de
@@ -403,6 +431,10 @@ function proyectar(E, stock0, nuevos, periodos, shock, conVar) {
 
   for (const T of periodos) {
     const par = T % 100;
+    // El tope por maduración depende del semestre, así que se recalcula en cada
+    // paso de la recursión y no dentro del bucle de celdas.
+    const topeMaduracion = [];
+    for (let is = 0; is < (E.nSedes || D.sedes.length); is++) topeMaduracion[is] = topeSede(E, is, T);
     const dest = new Map(), dvar = conVar ? new Map() : null;
     for (let L = 1; L <= LAG; L++) {
       const Tori = moverPeriodo(T, -L);
@@ -422,7 +454,7 @@ function proyectar(E, stock0, nuevos, periodos, shock, conVar) {
         if (qq <= 0) return;
         const [av, na] = avanceDe(E, ic, ciclo);
         const [tt, nt] = turnoDe(E, is, ciclo, it);
-        const tope = planPorIc[ic] || D.planDefecto;
+        const tope = Math.min(planPorIc[ic] || D.planDefecto, topeMaduracion[is]);
         const vx = conVar ? (vr.get(clave) || 0) : 0;
         for (let di = 0; di < ND; di++) {
           if (av[di] <= 0) continue;
@@ -448,7 +480,10 @@ function proyectar(E, stock0, nuevos, periodos, shock, conVar) {
     if (nv) nv.forEach((cant, clave) => {
       if (cant <= 0) return;
       const pz = clave.split('|');
-      const is = +pz[0], ic = +pz[1], ciclo = +pz[2];
+      const is = +pz[0], ic = +pz[1];
+      // El ingresante tampoco puede entrar a un ciclo que la sede aún no
+      // imparte ni que exceda el plan de la carrera.
+      const ciclo = Math.min(+pz[2], planPorIc[ic] || D.planDefecto, topeMaduracion[is]);
       const [mz, nm] = mezclaNuevos(E, is, ic, ciclo, par);
       for (let ti = 0; ti < NT; ti++) {
         if (mz[ti] <= 0) continue;

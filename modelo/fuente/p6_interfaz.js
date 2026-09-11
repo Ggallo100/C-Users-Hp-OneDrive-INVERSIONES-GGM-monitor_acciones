@@ -10,6 +10,7 @@ const S = {
   iC: new Map(DATOS.carreras.map((v, i) => [v, i])),
   iT: new Map(DATOS.turnos.map((v, i) => [v, i])),
   planPorIc: DATOS.carreras.map(c => DATOS.planCiclos[c] || DATOS.planDefecto),
+  aperturaPorIs: DATOS.sedes.map(s => DATOS.sedeApertura[s] || { enMaduracion: false }),
   carrerasNuevas: new Set(),
   sedesNuevas: new Set(),
   entrada: null,      // { nombre, filas, periodos, avisos }
@@ -22,7 +23,17 @@ function idxSede(nom) {
   if (S.iS.has(nom)) return S.iS.get(nom);
   const i = S.sedes.length;
   S.sedes.push(nom); S.iS.set(nom, i); S.sedesNuevas.add(nom);
+  S.aperturaPorIs[i] = { enMaduracion: false };   // se fija tras leer el archivo
   return i;
+}
+
+/** Ciclo máximo que una sede puede ofrecer en un semestre dado. */
+function topeCicloSede(is, T) {
+  const ap = S.aperturaPorIs[is];
+  if (!ap || !ap.enMaduracion) return 1e6;
+  // Antes de la apertura el tope sería negativo; 0 expresa que la sede aún no
+  // ofrece ningún ciclo, que es lo correcto y además evita ciclos absurdos.
+  return Math.max(0, ap.cicloBase + (indicePeriodo(T) - indicePeriodo(ap.inicio)));
 }
 function idxCarrera(nom, ciclosPlan) {
   if (S.iC.has(nom)) {
@@ -91,6 +102,8 @@ function recalcular() {
 
   S.E = estimar(S.D, lam, lamN, fk);
   S.E.planPorIc = S.planPorIc;
+  S.E.apertura = S.aperturaPorIs;
+  S.E.nSedes = S.sedes.length;
 
   const periodos = periodosProyeccion();
   const nuevos = S.entrada ? S.entrada.mapa : nuevosReferencia(periodos);
@@ -201,23 +214,63 @@ async function cargarArchivo(file) {
     S.sedes = S.D.sedes.slice(); S.iS = new Map(S.D.sedes.map((v, i) => [v, i]));
     S.carreras = S.D.carreras.slice(); S.iC = new Map(S.D.carreras.map((v, i) => [v, i]));
     S.planPorIc = S.D.carreras.map(c => S.D.planCiclos[c] || S.D.planDefecto);
+    S.aperturaPorIs = S.D.sedes.map(sd => S.D.sedeApertura[sd] || { enMaduracion: false });
 
-    const mapa = new Map();
+    // Primera pasada: registrar sedes y carreras para fijar sus índices.
     for (const r of filas) {
-      const is = idxSede(r.sede);
-      const ic = idxCarrera(r.carrera, r.plan);
-      const tope = S.planPorIc[ic];
+      r.is = idxSede(r.sede);
+      r.ic = idxCarrera(r.carrera, r.plan);
+    }
+
+    /* Apertura de las sedes NUEVAS. Una sede que aparece por primera vez en el
+       archivo empieza a operar en ese semestre, así que despliega su plan de
+       estudios ciclo a ciclo igual que hizo Lima Norte desde 2026-I. El ciclo
+       base es el mayor declarado en su semestre de apertura: normalmente el 1,
+       pero si la sede abre admitiendo traslados a ciclos superiores, esos
+       ciclos existen desde el arranque. */
+    S.sedesNuevas.forEach(nom => {
+      const is = S.iS.get(nom);
+      const suyas = filas.filter(r => r.is === is);
+      const inicio = Math.min.apply(null, suyas.map(r => r.per));
+      const cicloBase = Math.max.apply(null, suyas.filter(r => r.per === inicio).map(r => r.ciclo));
+      S.aperturaPorIs[is] = { inicio, cicloBase, enMaduracion: true, declarada: true };
+    });
+
+    // Segunda pasada: topes de plan y de maduración de sede.
+    const mapa = new Map();
+    const recortes = { plan: 0, sede: 0 };
+    for (const r of filas) {
+      const topePlan = S.planPorIc[r.ic];
+      const topeSed = topeCicloSede(r.is, r.per);
+      const tope = Math.min(topePlan, topeSed);
       if (r.ciclo > tope) {
-        avisos.push({
-          t: 'aviso', m: 'Fila ' + r.fila + ': ciclo ' + r.ciclo + ' supera los ' + tope +
-            ' ciclos del plan de ' + r.carrera + '; se ajusta al ciclo ' + tope + '.'
-        });
+        if (topeSed < topePlan) {
+          recortes.sede++;
+          if (recortes.sede <= 3) avisos.push({
+            t: 'aviso', m: 'Fila ' + r.fila + ': ' + r.sede + ' no imparte todavía el ciclo ' +
+              r.ciclo + ' en ' + rotuloPeriodo(r.per) + ' (inició en ' +
+              rotuloPeriodo(S.aperturaPorIs[r.is].inicio) + ', llega hasta el ciclo ' + tope +
+              '); esos ' + fmtN(r.cant) + ' ingresantes se asignan al ciclo ' + tope + '.'
+          });
+        } else {
+          recortes.plan++;
+          if (recortes.plan <= 3) avisos.push({
+            t: 'aviso', m: 'Fila ' + r.fila + ': ciclo ' + r.ciclo + ' supera los ' + tope +
+              ' ciclos del plan de ' + r.carrera + '; se ajusta al ciclo ' + tope + '.'
+          });
+        }
         r.ciclo = tope;
       }
       if (!mapa.has(r.per)) mapa.set(r.per, new Map());
-      const k = is + '|' + ic + '|' + r.ciclo;
+      const k = r.is + '|' + r.ic + '|' + r.ciclo;
       mapa.get(r.per).set(k, (mapa.get(r.per).get(k) || 0) + r.cant);
     }
+    if (recortes.sede > 3) avisos.push({
+      t: 'aviso', m: '… y ' + (recortes.sede - 3) + ' fila(s) más recortadas por el ciclo máximo de su sede.'
+    });
+    if (recortes.plan > 3) avisos.push({
+      t: 'aviso', m: '… y ' + (recortes.plan - 3) + ' fila(s) más recortadas por el plan de su carrera.'
+    });
 
     const per = Array.from(periodos).sort((a, b) => a - b);
     const antiguos = per.filter(p => p <= ULTIMO);
@@ -238,7 +291,8 @@ async function cargarArchivo(file) {
     if (S.sedesNuevas.size) {
       avisos.push({
         t: 'aviso', m: 'Sede(s) sin historia en la base: ' + Array.from(S.sedesNuevas).join(', ') +
-          '. El reparto por turno se toma de la distribución institucional global.'
+          '. El reparto por turno se toma de la distribución institucional global y se les aplica ' +
+          'el despliegue progresivo del plan desde su semestre de apertura.'
       });
     }
 
@@ -307,17 +361,30 @@ function descargarPlantilla() {
     ['y de la sede correspondientes, e informa de ello en la pestaña «Ingresantes».'],
     ['Si el plan no dura ' + S.D.planDefecto + ' ciclos, indíquelo en «CiclosPlan».'],
     [],
+    [H('Sedes nuevas y maduración')],
+    ['Una sede que abre despliega su plan de estudios semestre a semestre: en el de apertura'],
+    ['sólo existe el ciclo 1, un semestre después el 2, y así sucesivamente.'],
+    ['El modelo aplica ese tope automáticamente y avisa si una fila declara ingresantes en un'],
+    ['ciclo que la sede todavía no imparte.'],
+    ['Si escribe una sede que no figura en el catálogo, se entiende que abre en el primer'],
+    ['semestre en que aparezca en esta hoja.'],
+    [],
     [H('Nomenclatura de semestres')],
     ['Último semestre observado en la base', rotuloPeriodo(ULTIMO)],
     ['Primer semestre proyectable', rotuloPeriodo(moverPeriodo(ULTIMO, 1))],
     ['Formato', 'AAAA-I (primer semestre) · AAAA-II (segundo semestre)'],
   ];
 
-  const cat = [['Sedes', 'Turnos observados en la sede'].map(H)];
+  const cat = [['Sedes', 'Turnos observados en la sede', 'Ciclo máximo ofertable'].map(H)];
   S.D.sedes.forEach((s, is) => {
     const ts = new Set();
     S.D.stock.forEach(f => { if (f[1] === is) ts.add(S.D.turnos[f[4]]); });
-    cat.push([s, Array.from(ts).join(' · ')]);
+    const ap = S.D.sedeApertura[s];
+    const nota = !ap || !ap.enMaduracion ? 'Plan completo'
+      : 'Abrió en ' + rotuloPeriodo(ap.inicio) + ': ciclo ' +
+      Math.min(ap.cicloBase + (indicePeriodo(per[0]) - indicePeriodo(ap.inicio)), S.D.cicloMax) +
+      ' en ' + rotuloPeriodo(per[0]) + ', +1 por semestre';
+    cat.push([s, Array.from(ts).join(' · '), nota]);
   });
   cat.push([]);
   cat.push(['Carreras', 'Ciclos del plan'].map(H));
@@ -326,7 +393,7 @@ function descargarPlantilla() {
   const blob = construirXlsx([
     { nombre: 'Instrucciones', filas: inst, anchos: [46, 86] },
     { nombre: 'Ingresantes', filas, anchos: [11, 13, 52, 8, 10, 12], inmovilizar: 1 },
-    { nombre: 'Catálogos', filas: cat, anchos: [52, 30] },
+    { nombre: 'Catálogos', filas: cat, anchos: [52, 30, 46] },
   ]);
   descargar('plantilla_ingresantes_' + hoyISO() + '.xlsx', blob);
   brindis('Plantilla descargada · edite la hoja «Ingresantes»');
@@ -627,6 +694,37 @@ function pintarIngresantes() {
   $('#tbIngresantes').innerHTML = h.join('');
 }
 
+/**
+ * Tabla de maduración: para cada sede, el ciclo máximo que puede ofrecer en
+ * cada semestre proyectado. Las sedes consolidadas muestran el plan completo.
+ */
+function pintarMaduracion() {
+  const P = S.proy;
+  const h = ['<thead><tr><th class="txt">Sede</th><th class="txt">Apertura</th>' +
+    '<th class="txt">Origen</th>' +
+    P.periodos.slice(0, 10).map(T => '<th>' + rotuloPeriodo(T) + '</th>').join('') +
+    '</tr></thead><tbody>'];
+  S.sedes.forEach((nom, is) => {
+    const ap = S.aperturaPorIs[is];
+    const enMad = ap && ap.enMaduracion;
+    const origen = !enMad ? 'Sede consolidada'
+      : ap.declarada ? 'Declarada en el archivo' : 'Inferida del histórico';
+    h.push('<tr><td class="txt">' + esc(nom) +
+      (S.sedesNuevas.has(nom) ? ' <span class="pastilla nueva">nueva</span>' : '') +
+      '</td><td class="txt">' + (enMad ? rotuloPeriodo(ap.inicio) + ' · ciclo ' + ap.cicloBase : '—') +
+      '</td><td class="txt mini">' + origen + '</td>' +
+      P.periodos.slice(0, 10).map(T => {
+        const t = topeCicloSede(is, T);
+        if (t >= 1e5) return '<td class="mini">sin tope</td>';
+        if (t <= 0) return '<td class="mini">no opera</td>';
+        const tapa = Math.min(t, S.D.cicloMax);
+        return '<td' + (t <= S.D.cicloMax ? ' style="font-weight:650"' : '') + '>' + tapa + '</td>';
+      }).join('') + '</tr>');
+  });
+  h.push('</tbody>');
+  $('#tbMaduracion').innerHTML = h.join('');
+}
+
 /* ---- modelo y validación ---- */
 function pintarModelo() {
   const P = S.proy, V = S.D.varianza, VA = S.D.validacion;
@@ -653,6 +751,9 @@ function pintarModelo() {
       [S.E.kAvance, S.E.kTurno, S.E.kNuevos].map(x => fmtD(x)).join(' · ')],
     ['Continuación global por rezago', S.E.contGlobal.map(x => fmtP2(x)).join(' · ')],
   ].map(([a, b]) => '<dt>' + esc(a) + '</dt><dd>' + b + '</dd>').join('');
+
+  // Maduración de sede
+  pintarMaduracion();
 
   // Continuación por ciclo
   const dCont = [];
