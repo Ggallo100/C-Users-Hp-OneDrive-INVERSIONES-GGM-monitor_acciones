@@ -341,9 +341,13 @@ function graficoLineas(sel, etiquetas, series, opts) {
     pts.forEach(o => g.push('<circle cx="' + X(o.i) + '" cy="' + Y(o.v) + '" r="3.4" fill="' + s.c +
       '" stroke="' + tok('--sup') + '" stroke-width="1.5"/>'));
     /* Etiqueta directa al INICIO de la línea. Al final las series convergen y
-       los rótulos se solapan; en el arranque están bien separadas. */
-    g.push('<text x="' + (X(pts[0].i) + 8) + '" y="' + (Y(pts[0].v) - 7) +
-      '" style="fill:' + s.c + ';font-size:10px;font-weight:600">' + esc(s.t) + '</text>');
+       los rótulos se solapan; en el arranque suelen estar bien separadas. Con
+       `sinRotulos` se omiten: hay gráficos —cuatro series que arrancan en la
+       misma banda— en los que ni el inicio basta y la leyenda cumple mejor. */
+    if (!opts.sinRotulos) {
+      g.push('<text x="' + (X(pts[0].i) + 8) + '" y="' + (Y(pts[0].v) - 7) +
+        '" style="fill:' + s.c + ';font-size:10px;font-weight:600">' + esc(s.t) + '</text>');
+    }
   });
   if (opts.marcar != null) {
     g.push('<line x1="' + X(opts.marcar) + '" y1="' + M.t + '" x2="' + X(opts.marcar) + '" y2="' + (M.t + ih) +

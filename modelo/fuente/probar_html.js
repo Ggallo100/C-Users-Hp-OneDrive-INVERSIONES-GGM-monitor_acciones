@@ -36,9 +36,12 @@ const CAPT = path.join(__dirname, 'capturas');
     // ingresantes reflejados
     const nuevos = suma(P.nuevos.get(T0));
     let enCiclo1 = 0;
-    P.cen.get(T0).forEach((v, k) => { if (+k.split('|')[3] === 1) enCiclo1 += v; });
+    P.cen.get(T0).forEach((v, k) => { if (+k.split('|')[4] === 1) enCiclo1 += v; });
+    const porCond = S.D.condiciones.map(() => 0);
+    P.cen.get(T0).forEach((v, k) => { porCond[+k.split('|')[3]] += v; });
     return {
       periodos: P.periodos.map(rotuloPeriodo), cen, alt, baj, porSede, nuevos, enCiclo1,
+      porCond, condiciones: S.D.condiciones, total: cen,
       z: P.z, sigma: P.sigma, conf: P.conf,
       kpis: Array.from(document.querySelectorAll('#kpis .vl')).map(e => e.textContent),
       filasResumen: document.querySelectorAll('#tbResumen tbody tr').length,
@@ -54,6 +57,10 @@ const CAPT = path.join(__dirname, 'capturas');
   console.log('  total ' + r.periodos[0] + ': pes %s / mod %s / opt %s', r.baj.toFixed(1), r.cen.toFixed(1), r.alt.toFixed(1));
   console.log('  aditividad por sede: %s (dif %s)', r.porSede.toFixed(6), Math.abs(r.porSede - r.cen).toExponential(2));
   console.log('  ingresantes %s · en ciclo 1 %s', r.nuevos.toFixed(0), r.enCiclo1.toFixed(1));
+  console.log('  desglose por condición: %s  (suma %s, dif %s)',
+    r.porCond.map((v, i) => r.condiciones[i] + ' ' + v.toFixed(1)).join(' · '),
+    r.porCond.reduce((a, b) => a + b, 0).toFixed(3),
+    Math.abs(r.porCond.reduce((a, b) => a + b, 0) - r.total).toExponential(2));
   console.log('  z=%s sigma=%s conf=%s', r.z.toFixed(4), r.sigma.toFixed(5), r.conf);
   console.log('  KPIs:', r.kpis.join(' | '));
   console.log('  filas resumen/detalle/celdas:', r.filasResumen, r.filasDetalle, r.filasCeldas, '| svg:', r.svgs);

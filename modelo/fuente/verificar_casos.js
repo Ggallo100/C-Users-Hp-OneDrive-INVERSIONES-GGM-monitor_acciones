@@ -15,7 +15,7 @@ const ARCHIVO = 'file://' + path.resolve(__dirname, '..', '..', 'modelo_proyecci
   const r = await pag.evaluate(() => {
     const P = S.proy, D = S.D;
     const isE = S.iS.get('Lima Este'), icIA = S.iC.get('INTELIGENCIA ARTIFICIAL');
-    const salida = { avisosEste: [], porCicloEste: {}, iaPorModa: {}, iaNivel: {}, apertura: {} };
+    const salida = { avisosEste: [], porCicloEste: {}, porCondEste: {}, iaPorModa: {}, iaNivel: {}, apertura: {} };
     salida.avisosEste = S.entrada.avisos.map(a => a.m);
     salida.recortes = (S.entrada.recortes || []).map(x => JSON.stringify(x));
     salida.apertura = S.aperturaPorIs && S.aperturaPorIs[isE];
@@ -23,10 +23,16 @@ const ARCHIVO = 'file://' + path.resolve(__dirname, '..', '..', 'modelo_proyecci
       const m = {}; const ia = {};
       P.cen.get(T).forEach((v, k) => {
         const z = k.split('|').map(Number);
-        if (z[0] === isE) m[z[3]] = (m[z[3]] || 0) + v;
+        if (z[0] === isE) m[z[4]] = (m[z[4]] || 0) + v;
         if (z[1] === icIA) ia[D.modalidades[z[2]]] = (ia[D.modalidades[z[2]]] || 0) + v;
       });
       salida.porCicloEste[rotuloPeriodo(T)] = m;
+      const pc = {};
+      P.cen.get(T).forEach((v, k) => {
+        const z = k.split('|').map(Number);
+        if (z[0] === isE) pc[D.condiciones[z[3]]] = (pc[D.condiciones[z[3]]] || 0) + v;
+      });
+      salida.porCondEste[rotuloPeriodo(T)] = pc;
       salida.iaPorModa[rotuloPeriodo(T)] = ia;
     });
     ['A distancia', 'Presencial', 'Semi Presencial'].forEach(mm => {
@@ -39,7 +45,8 @@ const ARCHIVO = 'file://' + path.resolve(__dirname, '..', '..', 'modelo_proyecci
   console.log('--- SEDE NUEVA: Lima Este ---');
   console.log('apertura detectada:', JSON.stringify(r.apertura));
   r.avisosEste.forEach(a => console.log('  aviso:', a));
-  Object.entries(r.porCicloEste).forEach(([T, m]) => console.log('  %s  ciclos:', T, m));
+  Object.entries(r.porCicloEste).forEach(([T, m]) => console.log('  %s  ciclos: %s   condición: %s', T,
+    JSON.stringify(m), JSON.stringify(r.porCondEste[T])));
   console.log('\n--- PROGRAMA NUEVO: INTELIGENCIA ARTIFICIAL ---');
   Object.entries(r.iaPorModa).forEach(([T, m]) => console.log('  %s  %s', T,
     Object.entries(m).map(([k, v]) => k + ' ' + v.toFixed(1)).join('   ')));

@@ -145,39 +145,67 @@ function crc32(u8) {
   return (c ^ 0xFFFFFFFF) >>> 0;
 }
 
-/** Empaquetado ZIP por el método «almacenado»: sin dependencias externas. */
-function crearZip(archivos) {
+/** Comprime con deflate crudo, que es lo que entiende el formato ZIP. */
+async function desinflar(u8) {
+  const cs = new CompressionStream('deflate-raw');
+  const w = cs.writable.getWriter();
+  w.write(u8); w.close();
+  return new Uint8Array(await new Response(cs.readable).arrayBuffer());
+}
+
+/**
+ * Empaquetado ZIP sin dependencias externas.
+ *
+ * Los XML de una hoja de cálculo son muy repetitivos —nombres de carrera que se
+ * repiten miles de veces, la misma estructura de etiqueta por celda— y se
+ * comprimen alrededor de diez a uno. Con el estado desagregado actual la hoja
+ * de proyección pasa de los quince mil registros, así que el método
+ * «almacenado» dejaba archivos de más de diez megabytes sin necesidad.
+ * `CompressionStream` es la contrapartida de la `DecompressionStream` que ya
+ * usa el lector; si el navegador no la tuviera se almacena sin comprimir, que
+ * sigue siendo un ZIP válido.
+ */
+async function crearZip(archivos) {
   const partes = [], central = [];
   let desplaza = 0;
   const cod = new TextEncoder();
+  const puedeComprimir = typeof CompressionStream === 'function';
   for (const a of archivos) {
     const nombre = cod.encode(a.nombre);
     const crc = crc32(a.datos);
+    let datos = a.datos, metodo = 0;
+    if (puedeComprimir) {
+      try {
+        const z = await desinflar(a.datos);
+        // Un archivo minúsculo puede crecer al comprimirlo; entonces no compensa.
+        if (z.length < a.datos.length) { datos = z; metodo = 8; }
+      } catch (e) { /* se queda almacenado */ }
+    }
     const lh = new Uint8Array(30 + nombre.length);
     const dv = new DataView(lh.buffer);
     dv.setUint32(0, 0x04034b50, true);
     dv.setUint16(4, 20, true); dv.setUint16(6, 0x0800, true);
-    dv.setUint16(8, 0, true);
+    dv.setUint16(8, metodo, true);
     dv.setUint32(14, crc, true);
-    dv.setUint32(18, a.datos.length, true);
+    dv.setUint32(18, datos.length, true);
     dv.setUint32(22, a.datos.length, true);
     dv.setUint16(26, nombre.length, true);
     lh.set(nombre, 30);
-    partes.push(lh, a.datos);
+    partes.push(lh, datos);
 
     const cd = new Uint8Array(46 + nombre.length);
     const dc = new DataView(cd.buffer);
     dc.setUint32(0, 0x02014b50, true);
     dc.setUint16(4, 20, true); dc.setUint16(6, 20, true);
-    dc.setUint16(8, 0x0800, true); dc.setUint16(10, 0, true);
+    dc.setUint16(8, 0x0800, true); dc.setUint16(10, metodo, true);
     dc.setUint32(16, crc, true);
-    dc.setUint32(20, a.datos.length, true);
+    dc.setUint32(20, datos.length, true);
     dc.setUint32(24, a.datos.length, true);
     dc.setUint16(28, nombre.length, true);
     dc.setUint32(42, desplaza, true);
     cd.set(nombre, 46);
     central.push(cd);
-    desplaza += lh.length + a.datos.length;
+    desplaza += lh.length + datos.length;
   }
   const tamCentral = central.reduce((s, c) => s + c.length, 0);
   const fin = new Uint8Array(22);
@@ -212,7 +240,7 @@ function colLetra(n) {
  * Cada celda puede ser un número, una cadena, o {v, e} donde `e` es el estilo
  * (0 normal, 1 cabecera, 2 entero, 3 dos decimales, 4 porcentaje, 5 título).
  */
-function construirXlsx(hojas) {
+async function construirXlsx(hojas) {
   const cod = new TextEncoder();
   const txt = s => ({ datos: cod.encode(s) });
   const arch = [];

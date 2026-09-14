@@ -51,6 +51,7 @@ const SIN_MOD = path.join(__dirname, 'descargas', 'ingresantes_sin_modalidad.xls
   await tomar('04_composicion', '#tjComposicion');
   // 5. Tabla resumen
   await tomar('04b_modalidad_serie', '#tjModalidadSerie');
+  await tomar('04c_condicion_serie', '#tjCondicionSerie');
   await tomar('05_tabla_resumen', '#tjResumen');
   // 6. Detalle: filtros y cruce
   await tomar('06_detalle_filtros', '#tjFiltros', { pagina: 'detalle' });
@@ -62,6 +63,7 @@ const SIN_MOD = path.join(__dirname, 'descargas', 'ingresantes_sin_modalidad.xls
   // 11. Modelo
   await tomar('11_ecuacion', '#tjEcuacion', { pagina: 'modelo' });
   await tomar('11a_modalidad', '#tjModalidadModelo');
+  await tomar('11c_condicion', '#tjCondicionModelo');
   await tomar('11b_maduracion', '#tjMaduracion');
   await tomar('12_continuacion', '#tjContinuacion');
   await tomar('13_turno_periodo', '#tjTurnoPeriodo');

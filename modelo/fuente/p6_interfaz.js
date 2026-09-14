@@ -50,10 +50,10 @@ function idxCarrera(nom, ciclosPlan) {
 /** Stock histórico observado, punto de partida de la recursión. */
 function stockInicial() {
   const m = new Map();
-  for (const [ip, is, ic, im, ci, it, v] of S.D.stock) {
+  for (const [ip, is, ic, im, id, ci, it, v] of S.D.stock) {
     const p = S.D.periodos[ip];
     if (!m.has(p)) m.set(p, new Map());
-    m.get(p).set(is + '|' + ic + '|' + im + '|' + ci + '|' + it, v);
+    m.get(p).set(is + '|' + ic + '|' + im + '|' + id + '|' + ci + '|' + it, v);
   }
   return m;
 }
@@ -131,7 +131,7 @@ function periodosProyeccion() {
 
 /* ---- cálculo principal ---- */
 function recalcular() {
-  const lam = Math.min(1, Math.max(0.05, +$('#lam').value || 0.65));
+  const lam = Math.min(1, Math.max(0.05, +$('#lam').value || S.D.lambdaElegida || 1));
   const lamN = Math.min(1, Math.max(0.05, +$('#lamN').value || 0.3));
   const fk = Math.min(10, Math.max(0.1, +$('#factorK').value || 1));
   const conf = +$('#confianza').value || 0.8;
@@ -162,12 +162,13 @@ function recalcular() {
 /* ---- agregación ---- */
 function descomponer(clave) {
   const p = clave.split('|');
-  return { is: +p[0], ic: +p[1], im: +p[2], ciclo: +p[3], it: +p[4] };
+  return { is: +p[0], ic: +p[1], im: +p[2], id: +p[3], ciclo: +p[4], it: +p[5] };
 }
 function nombreDe(d) {
   return {
     Sede: S.sedes[d.is], Carrera: S.carreras[d.ic],
-    Modalidad: S.D.modalidades[d.im], Ciclo: d.ciclo, Turno: S.D.turnos[d.it],
+    Modalidad: S.D.modalidades[d.im], Condición: S.D.condiciones[d.id],
+    Ciclo: d.ciclo, Turno: S.D.turnos[d.it],
   };
 }
 /** Agrega un Map de celdas según una función de clave. */
@@ -408,7 +409,7 @@ async function cargarArchivo(file) {
 /* ==========================================================================
    PLANTILLA DE ENTRADA
    ========================================================================== */
-function descargarPlantilla() {
+async function descargarPlantilla() {
   const H = c => ({ v: c, e: 1 });
   const T = c => ({ v: c, e: 5 });
 
@@ -463,6 +464,16 @@ function descargarPlantilla() {
     ['Si la columna se deja vacía el modelo estima el reparto, pero la composición está en fuerte'],
     ['deriva —a distancia pasó del 4,8 % al 19,6 % de la matrícula— y esa estimación arrastra error.'],
     [],
+    [H('El archivo declara sólo ingresantes')],
+    ['Los continuadores no se declaran: los genera el modelo. En los resultados aparecen'],
+    ['desglosados en tres grupos según cómo llegan al semestre, y ese desglose sale de la propia'],
+    ['recursión, no de ningún dato de entrada:'],
+    ['  Regulares     se matricularon también el semestre inmediato anterior.'],
+    ['  Reiniciados   interrumpieron un semestre y volvieron.'],
+    ['  Recuperados   interrumpieron dos o más semestres y volvieron.'],
+    ['Conviene mirarlos por separado al planificar: un reiniciado repite ciclo el doble que un'],
+    ['regular y tiene mucha menos probabilidad de seguir el semestre siguiente.'],
+    [],
     [H('Sedes nuevas y maduración')],
     ['Una sede que abre despliega su plan de estudios semestre a semestre: en el de apertura'],
     ['sólo existe el ciclo 1, un semestre después el 2, y así sucesivamente.'],
@@ -480,7 +491,7 @@ function descargarPlantilla() {
   const cat = [['Sedes', 'Turnos observados en la sede', 'Ciclo máximo ofertable'].map(H)];
   S.D.sedes.forEach((s, is) => {
     const ts = new Set();
-    S.D.stock.forEach(f => { if (f[1] === is) ts.add(S.D.turnos[f[5]]); });
+    S.D.stock.forEach(f => { if (f[1] === is) ts.add(S.D.turnos[f[6]]); });
     const ap = S.D.sedeApertura[s];
     const nota = !ap || !ap.enMaduracion ? 'Plan completo'
       : 'Abrió en ' + rotuloPeriodo(ap.inicio) + ': ciclo ' +
@@ -499,7 +510,7 @@ function descargarPlantilla() {
     cat.push([c, S.D.planCiclos[c] || S.D.planDefecto, ms.join(' · ') || '—']);
   });
 
-  const blob = construirXlsx([
+  const blob = await construirXlsx([
     { nombre: 'Instrucciones', filas: inst, anchos: [46, 86] },
     { nombre: 'Ingresantes', filas, anchos: [11, 13, 52, 17, 8, 10, 12], inmovilizar: 1 },
     { nombre: 'Catálogos', filas: cat, anchos: [52, 30, 46] },
@@ -519,6 +530,7 @@ function pintarTodo() {
   pintarComposicion();
   pintarPorSede();
   pintarPorModalidad();
+  pintarPorCondicion();
   pintarTablaResumen();
   poblarFiltros();
   pintarDetalle();
@@ -542,7 +554,7 @@ function pintarKpis() {
   const ult = P.periodos[P.periodos.length - 1];
   const cen = sumaMapa(P.cen.get(ult)), alt = sumaMapa(P.alt.get(ult)), baj = sumaMapa(P.baj.get(ult));
   const sd = Math.sqrt(sumaMapa(P.varz.get(ult)));
-  const base = S.D.stock.filter(f => f[0] === S.D.periodos.length - 1).reduce((s, f) => s + f[6], 0);
+  const base = S.D.stock.filter(f => f[0] === S.D.periodos.length - 1).reduce((s, f) => s + f[7], 0);
   const primero = P.periodos[0];
   const cen1 = sumaMapa(P.cen.get(primero));
   const nuevos = nuevosDe(ult);
@@ -565,7 +577,7 @@ function pintarKpis() {
       fmtP(sumaMapa(agrupar(P.cen.get(ult), d => S.D.modalidades[d.im] === 'A distancia' ? 'x' : null)) / Math.max(cen, 1)),
       'Observado en ' + rotuloPeriodo(ULTIMO) + ': ' +
       fmtP(S.D.stock.filter(f => f[0] === S.D.periodos.length - 1 &&
-        S.D.modalidades[f[3]] === 'A distancia').reduce((s, f) => s + f[6], 0) / Math.max(base, 1))],
+        S.D.modalidades[f[3]] === 'A distancia').reduce((s, f) => s + f[7], 0) / Math.max(base, 1))],
   ].map(([et, vl, de]) =>
     '<div class="kpi"><div class="et">' + esc(et) + '</div><div class="vl">' + vl +
     '</div><div class="de">' + de + '</div></div>').join('');
@@ -576,7 +588,7 @@ function pintarSerie() {
   const obsPorPer = new Map();
   S.D.stock.forEach(f => {
     const p = S.D.periodos[f[0]];
-    obsPorPer.set(p, (obsPorPer.get(p) || 0) + f[6]);
+    obsPorPer.set(p, (obsPorPer.get(p) || 0) + f[7]);
   });
   const datos = [];
   S.D.periodos.forEach(p => datos.push({ et: rotuloPeriodo(p), obs: obsPorPer.get(p) }));
@@ -635,7 +647,7 @@ function pintarPorModalidad() {
   const obs = new Map();
   S.D.stock.forEach(f => {
     const p = S.D.periodos[f[0]], k = p + '|' + f[3];
-    obs.set(k, (obs.get(k) || 0) + f[6]);
+    obs.set(k, (obs.get(k) || 0) + f[7]);
   });
   const et = S.D.periodos.map(rotuloPeriodo).concat(P.periodos.map(rotuloPeriodo));
   const series = S.D.modalidades.map((nom, im) => ({
@@ -649,23 +661,73 @@ function pintarPorModalidad() {
   });
 }
 
+/** Serie apilada de los continuadores por continuidad de la matrícula. */
+function pintarPorCondicion() {
+  const P = S.proy;
+  const obs = new Map();
+  S.D.stock.forEach(f => {
+    const p = S.D.periodos[f[0]], k = p + '|' + f[4];
+    obs.set(k, (obs.get(k) || 0) + f[7]);
+  });
+  const et = S.D.periodos.map(rotuloPeriodo).concat(P.periodos.map(rotuloPeriodo));
+  const series = S.D.condiciones.map((nom, id) => ({
+    t: nom, c: serieColor(id),
+    v: S.D.periodos.map(p => obs.get(p + '|' + id) || 0)
+      .concat(P.periodos.map(T => porCondicion(P.cen.get(T))[id])),
+  }));
+  leyenda('#legCondicion', series.map(s2 => ({ t: s2.t, c: s2.c })));
+  graficoApilado('#grCondicion', et, series, {
+    rotulos: false, alto: 260, desdeProy: S.D.periodos.length,
+  });
+}
+
+/**
+ * Reparto de una celda-mapa por condición de llegada. El índice 0 es el
+ * ingresante y los tres siguientes son los continuadores: regular, reiniciado
+ * y recuperado. Como la condición es parte de la clave del estado, el desglose
+ * es exacto y suma siempre el total.
+ */
+function porCondicion(mapa) {
+  const acc = new Array(S.D.condiciones.length).fill(0);
+  if (mapa) mapa.forEach((v, k) => { acc[+k.split('|')[3]] += v; });
+  return acc;
+}
+
+/** Desglose por condición de la matrícula OBSERVADA de un semestre. */
+function porCondicionObs(ip) {
+  const acc = new Array(S.D.condiciones.length).fill(0);
+  S.D.stock.forEach(x => { if (x[0] === ip) acc[x[4]] += x[7]; });
+  return acc;
+}
+
 function pintarTablaResumen() {
   const P = S.proy;
   const f = [];
-  f.push('<thead><tr><th class="txt">Semestre</th><th>Ingresantes</th><th>Continuadores</th>' +
-    '<th>Pesimista</th><th>Moderado</th><th>Optimista</th>' +
-    '<th>Intervalo de predicción ' + fmtP(P.conf) + '</th><th>Variación</th></tr></thead><tbody>');
-  let prev = S.D.stock.filter(x => x[0] === S.D.periodos.length - 1).reduce((s, x) => s + x[6], 0);
+  f.push('<thead><tr><th class="txt" rowspan="2">Semestre</th>' +
+    '<th rowspan="2">Ingresantes</th><th colspan="4">Continuadores</th>' +
+    '<th rowspan="2">Pesimista</th><th rowspan="2">Moderado</th>' +
+    '<th rowspan="2">Optimista</th>' +
+    '<th rowspan="2">Intervalo de predicción ' + fmtP(P.conf) + '</th>' +
+    '<th rowspan="2">Variación</th></tr>' +
+    '<tr><th>Regulares</th><th>Reiniciados</th><th>Recuperados</th>' +
+    '<th>Total</th></tr></thead><tbody>');
+  const ipUlt = S.D.periodos.length - 1;
+  const obs = porCondicionObs(ipUlt);
+  let prev = obs.reduce((x, y) => x + y, 0);
   f.push('<tr><td class="txt">' + rotuloPeriodo(ULTIMO) + ' <span class="pastilla">observado</span></td>' +
-    '<td>' + fmtN(S.D.nuevos.filter(x => x[0] === S.D.periodos.length - 1).reduce((s, x) => s + x[5], 0)) + '</td>' +
-    '<td colspan="4">' + fmtN(prev) + '</td><td>—</td><td>—</td></tr>');
+    '<td>' + fmtN(obs[0]) + '</td><td>' + fmtN(obs[1]) + '</td><td>' + fmtN(obs[2]) +
+    '</td><td>' + fmtN(obs[3]) + '</td><td>' + fmtN(prev - obs[0]) +
+    '</td><td colspan="3" style="text-align:center">' + fmtN(prev) +
+    '</td><td>—</td><td>—</td></tr>');
   P.periodos.forEach(T => {
     const c = sumaMapa(P.cen.get(T)), a = sumaMapa(P.alt.get(T)), b = sumaMapa(P.baj.get(T));
     const sd = Math.sqrt(sumaMapa(P.varz.get(T)));
     const hw = P.z * Math.sqrt(Math.pow((a - b) / 2 / P.z, 2) + sd * sd);
-    const n = nuevosDe(T);
+    const d = porCondicion(P.cen.get(T));
     const dv = c / Math.max(prev, 1) - 1;
-    f.push('<tr><td class="txt">' + rotuloPeriodo(T) + '</td><td>' + fmtN(n) + '</td><td>' + fmtN(c - n) +
+    f.push('<tr><td class="txt">' + rotuloPeriodo(T) + '</td>' +
+      '<td>' + fmtN(d[0]) + '</td><td>' + fmtN(d[1]) + '</td><td>' + fmtN(d[2]) +
+      '</td><td>' + fmtN(d[3]) + '</td><td>' + fmtN(c - d[0]) +
       '</td><td>' + fmtN(b) + '</td><td><b>' + fmtN(c) + '</b></td><td>' + fmtN(a) +
       '</td><td>' + fmtN(c - hw) + ' – ' + fmtN(c + hw) + '</td><td>' +
       (dv >= 0 ? '▲ ' : '▼ ') + fmtP(Math.abs(dv)) + '</td></tr>');
@@ -691,13 +753,14 @@ function poblarFiltros() {
   fijar('#fCarrera', Array.from(usadas).sort((a, b) => S.carreras[a].localeCompare(S.carreras[b]))
     .map(i => ({ v: i, t: S.carreras[i] + (S.carrerasNuevas.has(S.carreras[i]) ? ' (nuevo)' : '') })), 'Todas');
   fijar('#fModalidad', S.D.modalidades.map((m, i) => ({ v: i, t: m })), 'Todas');
+  fijar('#fCondicion', S.D.condiciones.map((c, i) => ({ v: i, t: c })), 'Todas');
   fijar('#fTurno', S.D.turnos.map((t, i) => ({ v: i, t })), 'Todos');
 }
 
 function filtroActivo() {
   const g = s => { const v = $(s).value; return v === '' ? null : +v; };
   return { per: g('#fPeriodo'), is: g('#fSede'), ic: g('#fCarrera'),
-           im: g('#fModalidad'), it: g('#fTurno') };
+           im: g('#fModalidad'), id: g('#fCondicion'), it: g('#fTurno') };
 }
 
 function celdasFiltradas(escenario) {
@@ -714,6 +777,7 @@ function celdasFiltradas(escenario) {
       if (fa.is !== null && d.is !== fa.is) return;
       if (fa.ic !== null && d.ic !== fa.ic) return;
       if (fa.im !== null && d.im !== fa.im) return;
+      if (fa.id !== null && d.id !== fa.id) return;
       if (fa.it !== null && d.it !== fa.it) return;
       out.push({ T, k, v, d, sd: Math.sqrt(P.varz.get(T).get(k) || 0) });
     });
@@ -724,8 +788,12 @@ function celdasFiltradas(escenario) {
 const VALOR_DIM = {
   Sede: d => S.sedes[d.is], Carrera: d => S.carreras[d.ic],
   Modalidad: d => S.D.modalidades[d.im],
+  Condición: d => S.D.condiciones[d.id],
   Ciclo: d => d.ciclo, Turno: d => S.D.turnos[d.it],
 };
+/* La condición se ordena por el orden natural del catálogo —ingresante,
+   regular, reiniciado, recuperado— y no alfabéticamente. */
+const ORDEN_DIM = { Condición: d => d.id };
 function etiquetaDim(dim, c) {
   if (dim === 'Periodo') return rotuloPeriodo(c.T);
   if (dim === 'Ciclo') return 'Ciclo ' + c.d.ciclo;
@@ -734,6 +802,7 @@ function etiquetaDim(dim, c) {
 function ordenDim(dim, c) {
   if (dim === 'Periodo') return c.T;
   if (dim === 'Ciclo') return c.d.ciclo;
+  if (ORDEN_DIM[dim]) return ORDEN_DIM[dim](c.d);
   return etiquetaDim(dim, c);
 }
 
@@ -853,70 +922,106 @@ function pintarIngresantes() {
  * agrupadas porque el ciclo es ordinal y lo que hay que leer es la forma de las
  * tres curvas: arrancan muy separadas y convergen a partir del tercer ciclo.
  */
-function pintarModalidadModelo() {
-  const cmax = S.D.cicloMax;
-  const ciclos = [];
-  for (let ci = 1; ci <= cmax; ci++) {
+/** Ciclos con evidencia, para el eje de las fichas de dimensión. */
+function ciclosConDatos() {
+  const out = [];
+  for (let ci = 1; ci <= S.D.cicloMax; ci++) {
     const a = S.E.porCiclo.get(String(ci));
-    if (a && a[0] > 0) ciclos.push(ci);
+    if (a && a[0] > 0) out.push(ci);
   }
-  const series = S.D.modalidades.map((nom, im) => ({
-    t: nom, c: serieColor(im),
-    v: ciclos.map(ci => {
-      const a = S.E.porModa.get(im + '|' + ci + '|1');
-      const b2 = S.E.porModa.get(im + '|' + ci + '|2');
-      let n = 0, k = 0;
-      if (a) { n += a[0]; k += a[S.E.LAG]; }
-      if (b2) { n += b2[0]; k += b2[S.E.LAG]; }
-      return n > 0 ? k / n * 100 : null;
-    }),
+  return out;
+}
+
+/**
+ * Ficha de una dimensión del estado: continuación por ciclo de cada categoría
+ * y cuadro comparado. Recibe ya agregadas la tabla de continuación —indexada
+ * por categoría|ciclo|paridad— y la de avance —por categoría|ciclo—, de modo
+ * que sirve igual para la modalidad y para la condición.
+ */
+function fichaDimension(cfg) {
+  const ciclos = ciclosConDatos();
+  const LAG = S.E.LAG;
+  /* Por debajo de este tamaño muestral efectivo la tasa de una celda es ruido:
+     una categoría con tres observaciones en el ciclo 11 dibujaría un punto que
+     no significa nada. Se deja en blanco en vez de en cero. */
+  const MIN_N = 20;
+  const tasa = (i, cis) => {
+    let n = 0, k = 0;
+    for (const ci of cis) for (const pa of [1, 2]) {
+      const a = cfg.cont.get(i + '|' + ci + '|' + pa);
+      if (a) { n += a[0]; k += a[LAG]; }
+    }
+    return n >= MIN_N ? k / n : null;
+  };
+  const series = cfg.categorias.map((nom, i) => ({
+    t: nom, c: serieColor(i),
+    v: ciclos.map(ci => { const r = tasa(i, [ci]); return r === null ? null : r * 100; }),
   }));
-  // Los ciclos sin evidencia en una modalidad se recortan al último con dato
-  series.forEach(se => {
-    let ultimo = se.v.length - 1;
-    while (ultimo >= 0 && se.v[ultimo] === null) ultimo--;
-    se.v = se.v.slice(0, ultimo + 1).map(v => v === null ? 0 : v);
-  });
-  const largo = Math.max.apply(null, series.map(s2 => s2.v.length));
-  series.forEach(se => { while (se.v.length < largo) se.v.push(null); });
-  leyenda('#legContMod', series.map(s2 => ({ t: s2.t, c: s2.c })));
-  graficoLineas('#grContMod', ciclos.slice(0, largo).map(String), series, {
-    alto: 260, fmtEje: v => fmtN(v) + ' %', tope100: true,
+  leyenda(cfg.leyenda, series.map(s2 => ({ t: s2.t, c: s2.c })));
+  graficoLineas(cfg.lienzo, ciclos.map(String), series, {
+    alto: 260, fmtEje: v => fmtN(v) + ' %', tope100: true, sinRotulos: cfg.sinRotulos,
   });
 
-  // Tabla resumen por modalidad
-  const h = ['<thead><tr><th class="txt">Modalidad</th><th>Matrícula ' + rotuloPeriodo(ULTIMO) +
-    '</th><th>Continuación ciclo 1</th><th>Continuación ciclos 2-9</th>' +
-    '<th>Avanza un ciclo</th><th>Repite ciclo</th></tr></thead><tbody>'];
-  S.D.modalidades.forEach((nom, im) => {
-    const mat = S.D.stock.filter(f => f[0] === S.D.periodos.length - 1 && f[3] === im)
-      .reduce((a, f) => a + f[6], 0);
-    const tasa = (cis) => {
-      let n = 0, k = 0;
-      for (const ci of cis) for (const pa of [1, 2]) {
-        const a = S.E.porModa.get(im + '|' + ci + '|' + pa);
-        if (a) { n += a[0]; k += a[S.E.LAG]; }
-      }
-      return n > 0 ? k / n : null;
-    };
-    const c1 = tasa([1]);
-    const c29 = tasa([2, 3, 4, 5, 6, 7, 8, 9]);
-    let av = null;
+  const iMas1 = S.D.deltas.indexOf(1), iCero = S.D.deltas.indexOf(0);
+  const h = ['<thead><tr><th class="txt">' + esc(cfg.titulo) + '</th><th>Matrícula ' +
+    rotuloPeriodo(ULTIMO) + '</th><th>Continuación ciclo 1</th>' +
+    '<th>Continuación ciclos 2-9</th><th>Avanza un ciclo</th>' +
+    '<th>Repite ciclo</th></tr></thead><tbody>'];
+  cfg.categorias.forEach((nom, i) => {
+    const mat = S.D.stock.filter(f => f[0] === S.D.periodos.length - 1 && f[cfg.col] === i)
+      .reduce((a, f) => a + f[7], 0);
+    const c1 = tasa(i, [1]);
+    const c29 = tasa(i, [2, 3, 4, 5, 6, 7, 8, 9]);
     const acc = new Array(S.E.ND).fill(0);
-    for (let ci = 1; ci <= cmax; ci++) {
-      const a = S.E.avModa.get(im + '|' + ci);
+    for (let ci = 1; ci <= S.D.cicloMax; ci++) {
+      const a = cfg.avance.get(i + '|' + ci);
       if (a) for (let j = 0; j < S.E.ND; j++) acc[j] += a[j];
     }
     const sa = acc.reduce((x, y) => x + y, 0);
-    const iMas1 = S.D.deltas.indexOf(1), iCero = S.D.deltas.indexOf(0);
-    h.push('<tr><td class="txt"><i class="pin" style="background:' + serieColor(im) +
+    h.push('<tr><td class="txt"><i class="pin" style="background:' + serieColor(i) +
       '"></i>' + esc(nom) + '</td><td>' + fmtN(mat) + '</td><td>' +
       (c1 == null ? '—' : fmtP(c1)) + '</td><td>' + (c29 == null ? '—' : fmtP(c29)) +
       '</td><td>' + (sa ? fmtP(acc[iMas1] / sa) : '—') + '</td><td>' +
       (sa ? fmtP(acc[iCero] / sa) : '—') + '</td></tr>');
   });
   h.push('</tbody>');
-  $('#tbModalidad').innerHTML = h.join('');
+  $(cfg.tablaHtml).innerHTML = h.join('');
+}
+
+/**
+ * Reagrega un mapa de conteos quedándose con algunas posiciones de la clave.
+ * Las tablas del motor llevan modalidad Y condición, así que la ficha de cada
+ * dimensión tiene que sumar sobre la otra antes de dibujar.
+ */
+function reagrupar(mapa, posiciones) {
+  const out = new Map();
+  mapa.forEach((v, k) => {
+    const z = k.split('|');
+    const nk = posiciones.map(i => z[i]).join('|');
+    let a = out.get(nk);
+    if (!a) { a = new Array(v.length).fill(0); out.set(nk, a); }
+    for (let i = 0; i < v.length; i++) a[i] += v[i];
+  });
+  return out;
+}
+
+function pintarModalidadModelo() {
+  fichaDimension({
+    titulo: 'Modalidad', categorias: S.D.modalidades, col: 3,
+    cont: reagrupar(S.E.porModa, [0, 2, 3]),   // im|id|ciclo|par -> im|ciclo|par
+    avance: reagrupar(S.E.avModa, [0, 2]),     // im|id|ciclo     -> im|ciclo
+    leyenda: '#legContMod', lienzo: '#grContMod', tablaHtml: '#tbModalidad',
+  });
+}
+
+function pintarCondicionModelo() {
+  fichaDimension({
+    titulo: 'Condición', categorias: S.D.condiciones, col: 4,
+    cont: S.E.porCond,                          // ya es id|ciclo|par
+    avance: S.E.avCond,                         // ya es id|ciclo
+    leyenda: '#legContCond', lienzo: '#grContCond', tablaHtml: '#tbCondicion',
+    sinRotulos: true,   // cuatro series que arrancan juntas: la leyenda basta
+  });
 }
 
 /**
@@ -1013,6 +1118,7 @@ function pintarModelo() {
 
   // Modalidad de estudios
   pintarModalidadModelo();
+  pintarCondicionModelo();
 
   // Maduración de sede
   pintarMaduracion();
@@ -1182,12 +1288,18 @@ function iniciar() {
     if (t) document.documentElement.dataset.tema = t;
   } catch (e) { }
 
+  /* Los valores por defecto de recencia salen de la propia estimación, no del
+     marcado: así no pueden quedarse desfasados cuando la rejilla elige otra λ
+     al regenerar el modelo con una base actualizada. */
+  if (DATOS.lambdaElegida) $('#lam').value = DATOS.lambdaElegida;
+  if (DATOS.lambdaNuevosElegida) $('#lamN').value = DATOS.lambdaNuevosElegida;
+
   $$('#pestanas button').forEach(b => b.onclick = () => cambiarPagina(b.dataset.pg));
   $('#archivo').onchange = ev => { if (ev.target.files[0]) cargarArchivo(ev.target.files[0]); ev.target.value = ''; };
   ['#horizonte', '#confianza', '#lam', '#lamN', '#factorK'].forEach(s =>
     $(s).onchange = () => { actualizarPistas(); recalcular(); });
-  ['#escenarioVista', '#fPeriodo', '#fSede', '#fCarrera', '#fModalidad', '#fTurno',
-    '#fFila', '#fCol'].forEach(s =>
+  ['#escenarioVista', '#fPeriodo', '#fSede', '#fCarrera', '#fModalidad',
+    '#fCondicion', '#fTurno', '#fFila', '#fCol'].forEach(s =>
     $(s).onchange = () => { pintarDetalle(); if (s === '#escenarioVista') pintarKpis(); });
 
   let t0;

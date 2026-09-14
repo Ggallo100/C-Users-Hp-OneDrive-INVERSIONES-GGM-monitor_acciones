@@ -8,12 +8,28 @@ para **reconstruir el documento Word** que lo explica.
 
 ## Dimensiones del estado
 
-El estado del modelo es `(sede, carrera, modalidad de estudios, ciclo, turno)`.
-La sede, la carrera y la modalidad se conservan a lo largo de la proyección —el
-99,4 % de los continuadores mantiene su modalidad de un semestre al siguiente—;
-el ciclo y el turno llevan matriz de transición estimada. La modalidad entra en
-la escalera de contracción entre el ciclo y la carrera y condiciona las tres
-probabilidades de la recursión: continuación, avance de ciclo y turno.
+El estado del modelo es
+`(sede, carrera, modalidad de estudios, continuidad de la matrícula, ciclo, turno)`.
+
+| Índice | Cambia | Tratamiento |
+|---|---|---|
+| Sede | 0 % | Se conserva. |
+| Modalidad | 0,56 % | Se conserva; condiciona las tres probabilidades. |
+| Carrera | 0,43 % | Se conserva. |
+| Continuidad | siempre | La fija el rezago del flujo; sin parámetros. |
+| Ciclo | 15,1 % | Matriz de avance estimada. |
+| Turno | 21,5 % | Matriz de transición estimada. |
+
+La **continuidad de la matrícula** distingue al continuador *regular* —se
+matriculó también el semestre anterior— del *reiniciado* —interrumpió uno— y del
+*recuperado* —interrumpió dos o más—; el *ingresante* ocupa la dimensión sólo en
+su primer semestre. No se declara en ningún sitio ni necesita matriz de
+transición: la determina el rezago del propio flujo (L = 1 regular, L = 2
+reiniciado, L ≥ 3 recuperado), de modo que el desglose de las tablas de
+resultados sale de la recursión y suma exactamente el total.
+
+Es el factor de mayor magnitud del modelo: a igualdad de ciclo y modalidad, los
+momios de continuar de un reiniciado son la quinta parte de los de un regular.
 
 ## Cuándo hace falta regenerar
 
@@ -36,24 +52,37 @@ Desde esta carpeta, con la ruta del Excel histórico actualizada en `RUTA`
 (constante al inicio de `estimar.py`):
 
 ```bash
-python3 estimar.py         # 1. barrido de λ por backtesting de origen móvil
-python3 fase2.py           # 2. varianza, calibración de escenarios y parametros.json
-python3 compactar.py       # 3. conteos por periodo en formato compacto
-python3 construir_html.py  # 4. ensambla el HTML final
+python3 compactar.py       # 1. conteos por periodo en formato compacto
+python3 rejilla.py         # 2. selección de λ por backtesting de origen móvil
+python3 fase2.py           # 3. varianza, calibración de κ y parametros.json
+python3 cobertura.py       # 4. cobertura de escenarios vs intervalo (para el documento)
+python3 construir_html.py  # 5. ensambla el HTML final
+python3 paridad.py         # 6. referencia para la prueba de paridad del motor JS
 ```
 
-El paso 1 imprime la rejilla de λ y selecciona el valor que minimiza el error
-fuera de muestra. El criterio es la media de las series de EPAP indexadas cada
-una a su propio mínimo, porque el error del cruce más fino es veinte veces mayor
-que el del total y dominaría cualquier media directa. Si el λ seleccionado cambia
-respecto de 0,65, hay que actualizarlo en la constante `LAM` de `fase2.py` y en
-el valor por defecto del control del HTML (`fuente/p2_cuerpo.html`), y volver a
-ejecutar desde el paso 2.
+Los pasos 2 a 4 tardan varios minutos cada uno: reestiman el modelo completo en
+cada punto de la rejilla y en cada origen del backtesting.
 
-> Un λ seleccionado en el **borde** de la rejilla es señal de que falta una
-> variable relevante en la especificación, no de que convenga estrechar más la
-> ventana. Ocurría antes de incorporar la modalidad: la recencia estaba haciendo
-> de variable omitida. Ver `ablacion.py` y el apartado 6.5 del documento.
+`rejilla.py` recorre la rejilla de λ y selecciona el valor por un criterio
+**minimax** sobre las series de EPAP indexadas cada una a su propio mínimo: se
+elige la λ que acota el peor sobrecoste relativo entre los ocho niveles de
+agregación. Se indexa porque el error del cruce más fino es veinte veces mayor
+que el del total; y se usa minimax en vez de la media porque la media la decide
+el nivel con mayor recorrido relativo, que no es el mismo en todas las
+especificaciones.
+
+Si el λ seleccionado cambia respecto de 0,90 hay que actualizar la constante
+`LAM` de `fase2.py` y `paridad.py` y volver a ejecutar desde el paso 2. El valor
+por defecto del control del HTML no hace falta tocarlo: la interfaz lo lee de
+`grid_lambda.json`.
+
+> **La posición de λ en la rejilla es un diagnóstico.** Un óptimo pegado al borde
+> **inferior** indica que falta una variable relevante: el estimador quiere
+> olvidar deprisa una deriva que no puede ver. Un óptimo cerca del borde
+> **superior** (λ = 1, sin descuento) es lo contrario, y además el modelo más
+> simple. Este modelo recorrió la rejilla de un extremo al otro a medida que se
+> incorporaron la modalidad y la continuidad: 0,30 → 0,40 → 0,90. Ver
+> `ablacion.py` y los apartados 6.5 a 6.7 del documento.
 
 ## Qué hace cada archivo
 
@@ -61,18 +90,22 @@ ejecutar desde el paso 2.
 |---|---|
 | `estimar.py` | Implementación de referencia: panel de transiciones, contracción empírico-Bayes, GLM de descomposición de varianza, motor de proyección y backtesting. Es la fuente de verdad contra la que se verifica el motor JavaScript. |
 | `fase2.py` | Calibra el factor de inflación de varianza κ contra la cobertura observada y escribe `parametros.json`. |
-| `compactar.py` | Empaqueta los conteos de transición por periodo en arreglos indexados (~215 KB) que se incrustan en el HTML, incluida la tabla de oferta `(sede, carrera, modalidad)`. |
+| `compactar.py` | Empaqueta los conteos de transición por periodo en arreglos indexados (~386 KB) que se incrustan en el HTML, incluida la tabla de oferta `(sede, carrera, modalidad)`. |
 | `construir_html.py` | Ensambla las piezas de `fuente/` con los datos y escribe el HTML final. |
-| `ablacion.py` | Contraste de especificación: ejecuta la canalización completa con y sin la dimensión de modalidad y compara el error en los niveles de agregación comunes. |
+| `rejilla.py` | Selección de λ por backtesting de origen móvil, con criterio minimax sobre las series indexadas. Escribe `grid_lambda.json`. |
+| `cobertura.py` | Cobertura empírica de la banda de escenarios frente a la del intervalo de predicción. Alimenta la tabla del capítulo 7 del documento. |
+| `paridad.py` | Reagrega `compacto.json` con la misma aritmética que el motor JavaScript y escribe `paridad_py.json`, la referencia contra la que se verifica. |
+| `ablacion.py` | Contraste de especificación: ejecuta la canalización completa con y sin una dimensión y compara el error en los niveles comunes. Admite `modalidad` o `condicion` como argumento. |
 | `preparar_prueba.py` | Genera los dos archivos de ingresantes de prueba, con y sin columna de modalidad. |
 
 ## Verificación
 
 `fuente/prueba_motor.js` comprueba que el motor JavaScript reproduce la
-implementación de Python sobre el mismo conjunto de parámetros. Las estimaciones
-puntuales deben coincidir en el orden de 10⁻¹⁰ y las constantes de contracción
-en sus diez primeros decimales; la desviación típica tolera ~10⁻⁷ relativo por el
-orden de acumulación en coma flotante.
+implementación de Python. Sobre seis semestres proyectados, los totales, las
+desviaciones típicas y los desgloses por modalidad y por continuidad coinciden
+con una diferencia relativa del orden de 10⁻¹⁶ —el epsilon de la doble
+precisión— y las constantes de contracción del orden de 10⁻¹⁵. El umbral del
+script es 10⁻⁶ relativo, mucho más laxo que cualquier error de lógica.
 
 `fuente/probar_html.js` abre el HTML generado en un navegador real, comprueba que
 no hay errores de consola, que los escenarios son aditivos y que no hay
@@ -86,6 +119,7 @@ la plantilla, carga un archivo de ingresantes y exporta la proyección.
 que todavía no puede ofertar.
 
 ```bash
+python3 paridad.py              # referencia de Python para la prueba de paridad
 python3 preparar_prueba.py      # genera los archivos de entrada de prueba
 cd fuente
 node prueba_motor.js
@@ -98,10 +132,10 @@ node verificar_casos.js
 
 `documento/` reconstruye `../Modelo_Proyeccion_Matricula.docx` a partir de las
 capturas de `documento/capturas/`, que genera `fuente/capturar.js` sobre el HTML
-ya compilado.
+ya compilado. Son 21 figuras.
 
 ```bash
-cd fuente && node capturar.js      # regenera las 19 figuras del documento
+cd fuente && node capturar.js      # regenera las figuras del documento
 cd ../documento && node doc_construir.js && python3 validate.py
 ```
 

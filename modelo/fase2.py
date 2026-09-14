@@ -28,7 +28,7 @@ from estimar import (cargar, panel, stock_observado, nuevos_observados,
                      construir_parametros, varianza_proceso, Modelo,
                      agrega, epap, NIVELES, siguiente)
 
-LAM, LAM_N = 0.65, 0.30
+LAM, LAM_N = 0.90, 0.30
 NIVEL_CONF = 0.80
 
 
@@ -95,8 +95,9 @@ if __name__ == "__main__":
 
     # kappa que acerca la cobertura media de los niveles desagregados al nominal
     objetivo = NIVEL_CONF
-    niv_fino = ["Sede×Carrera×Modalidad", "Sede×Carrera×Modalidad×Ciclo",
-                "Sede×Carrera×Modalidad×Ciclo×Turno"]
+    niv_fino = ["Sede×Carrera×Modalidad×Condición",
+                "Sede×Carrera×Modalidad×Condición×Ciclo",
+                "Sede×Carrera×Modalidad×Condición×Ciclo×Turno"]
     err = (rk[niv_fino].mean(axis=1) - objetivo).abs()
     KAPPA = float(err.idxmin())
     print(f"\nkappa seleccionada: {KAPPA}"
@@ -149,7 +150,8 @@ if __name__ == "__main__":
 
     # Stock observado del histórico: arranque de la recursión
     par["stockHistorico"] = {
-        str(p): [[k[0], k[1], k[2], k[3], k[4], int(v)] for k, v in sorted(stock[p].items())]
+        str(p): [[k[0], k[1], k[2], k[3], k[4], k[5], int(v)]
+                 for k, v in sorted(stock[p].items())]
         for p in per}
     par["nuevosHistorico"] = {
         str(p): [[k[0], k[1], k[2], k[3], int(v)] for k, v in sorted(nuevos.get(p, {}).items())]
@@ -167,8 +169,10 @@ if __name__ == "__main__":
           (vp["lr_periodo"], vp["gl_lr"], vp["p_periodo"], vp["pseudo_r2"], vp["n_obs"]))
     print("var: observada=%.3g muestral=%.3g proceso=%.3g" %
           (vp["var_observada"], vp["var_muestral"], vp["var_proceso"]))
-    print("\nk contracción rezago1: celda=%.1f carrera=%.1f ciclopar=%.1f ciclo=%.1f" %
-          (par["k_celda"][0], par["k_carrera"][0], par["k_ciclopar"][0], par["k_ciclo"][0]))
+    print("\nk contracción rezago1: celda=%.2f carrera=%.2f moda=%.2f cond=%.2f"
+          " ciclopar=%.2f ciclo=%.2f" %
+          (par["k_celda"][0], par["k_carrera"][0], par["k_moda"][0], par["k_cond"][0],
+           par["k_ciclopar"][0], par["k_ciclo"][0]))
     print("k_avance=%.1f k_turno=%.1f k_nuevos=%.1f" %
           (par["k_avance"], par["k_turno"], par["k_nuevos"]))
     print("q_L global:", [round(x, 5) for x in par["cont_global"]])

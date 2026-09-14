@@ -198,7 +198,7 @@ function kDirichlet(mat) {
  */
 function estimar(D, lam, lamN, factorK) {
   const LAG = D.lagMax, ND = D.deltas.length, NT = D.turnos.length;
-  const NM = D.modalidades.length;
+  const NM = D.modalidades.length, NC = D.condiciones.length;
   const tmax = D.periodos.length - 1;
   const w = t => Math.pow(lam, tmax - t);
   const wN = t => Math.pow(lamN, tmax - t);
@@ -209,22 +209,23 @@ function estimar(D, lam, lamN, factorK) {
 
   /* ---- continuación: n y k por rezago, en cinco niveles ---- */
   const celda = new Map(), porCarrera = new Map(), porModa = new Map(),
-    porCicloPar = new Map(), porCiclo = new Map();
+    porCond = new Map(), porCicloPar = new Map(), porCiclo = new Map();
   const glob = new Array(2 * LAG).fill(0);
   for (const f of D.cont) {
-    const [is, ic, im, ci, pa, ip] = f;
-    const v = f.slice(6), mult = w(ip);
-    suma(celda, is + '|' + ic + '|' + im + '|' + ci + '|' + pa, 2 * LAG, v, mult);
-    suma(porCarrera, ic + '|' + im + '|' + ci + '|' + pa, 2 * LAG, v, mult);
-    suma(porModa, im + '|' + ci + '|' + pa, 2 * LAG, v, mult);
+    const [is, ic, im, id, ci, pa, ip] = f;
+    const v = f.slice(7), mult = w(ip);
+    suma(celda, is + '|' + ic + '|' + im + '|' + id + '|' + ci + '|' + pa, 2 * LAG, v, mult);
+    suma(porCarrera, ic + '|' + im + '|' + id + '|' + ci + '|' + pa, 2 * LAG, v, mult);
+    suma(porModa, im + '|' + id + '|' + ci + '|' + pa, 2 * LAG, v, mult);
+    suma(porCond, id + '|' + ci + '|' + pa, 2 * LAG, v, mult);
     suma(porCicloPar, ci + '|' + pa, 2 * LAG, v, mult);
     suma(porCiclo, String(ci), 2 * LAG, v, mult);
     for (let i = 0; i < 2 * LAG; i++) glob[i] += v[i] * mult;
   }
-  const kCont = { celda: [], carrera: [], moda: [], ciclopar: [], ciclo: [] };
+  const kCont = { celda: [], carrera: [], moda: [], cond: [], ciclopar: [], ciclo: [] };
   for (let L = 0; L < LAG; L++) {
     for (const [nom, m] of [['celda', celda], ['carrera', porCarrera], ['moda', porModa],
-    ['ciclopar', porCicloPar], ['ciclo', porCiclo]]) {
+    ['cond', porCond], ['ciclopar', porCicloPar], ['ciclo', porCiclo]]) {
       const ex = [], en = [];
       m.forEach(a => { en.push(a[L]); ex.push(a[LAG + L]); });
       kCont[nom].push(kBetaBinom(ex, en) * factorK);
@@ -233,23 +234,27 @@ function estimar(D, lam, lamN, factorK) {
   const contGlobal = [];
   for (let L = 0; L < LAG; L++) contGlobal.push(glob[LAG + L] / Math.max(glob[L], 1e-9));
 
-  /* ---- avance de ciclo: celda(carrera,modalidad,ciclo) -> modalidad·ciclo -> ciclo ---- */
-  const avCelda = new Map(), avModa = new Map(), avCiclo = new Map();
+  /* ---- avance de ciclo: ciclo -> condición·ciclo -> condición·modalidad·ciclo
+         -> celda(carrera,modalidad,condición,ciclo) ---- */
+  const avCelda = new Map(), avModa = new Map(), avCond = new Map(), avCiclo = new Map();
   const avGlobal = new Array(ND).fill(0);
   for (const f of D.av) {
-    const [ic, im, ci, ip] = f, v = f.slice(4), mult = w(ip);
-    suma(avCelda, ic + '|' + im + '|' + ci, ND, v, mult);
-    suma(avModa, im + '|' + ci, ND, v, mult);
+    const [ic, im, id, ci, ip] = f, v = f.slice(5), mult = w(ip);
+    suma(avCelda, ic + '|' + im + '|' + id + '|' + ci, ND, v, mult);
+    suma(avModa, im + '|' + id + '|' + ci, ND, v, mult);
+    suma(avCond, id + '|' + ci, ND, v, mult);
     suma(avCiclo, String(ci), ND, v, mult);
     for (let i = 0; i < ND; i++) avGlobal[i] += v[i] * mult;
   }
   const kAvance = kDirichlet(Array.from(avCelda.values())) * factorK;
 
-  /* ---- transición de turno: celda(sede,modalidad,ciclo,turno) -> sede·modalidad·turno -> sede·turno ---- */
-  const tuCelda = new Map(), tuModa = new Map(), tuSede = new Map();
+  /* ---- transición de turno: sede·turno -> sede·modalidad·turno
+         -> sede·modalidad·condición·turno -> celda(+ciclo) ---- */
+  const tuCelda = new Map(), tuCond = new Map(), tuModa = new Map(), tuSede = new Map();
   for (const f of D.tu) {
-    const [is, im, ci, it, ip] = f, v = f.slice(5), mult = w(ip);
-    suma(tuCelda, is + '|' + im + '|' + ci + '|' + it, NT, v, mult);
+    const [is, im, id, ci, it, ip] = f, v = f.slice(6), mult = w(ip);
+    suma(tuCelda, is + '|' + im + '|' + id + '|' + ci + '|' + it, NT, v, mult);
+    suma(tuCond, is + '|' + im + '|' + id + '|' + it, NT, v, mult);
     suma(tuModa, is + '|' + im + '|' + it, NT, v, mult);
     suma(tuSede, is + '|' + it, NT, v, mult);
   }
@@ -287,10 +292,10 @@ function estimar(D, lam, lamN, factorK) {
   const kModalidad = kDirichlet(Array.from(nmCelda.values())) * factorK;
 
   return {
-    D, lam, lamN, factorK, LAG, ND, NT, NM,
-    celda, porCarrera, porModa, porCicloPar, porCiclo, contGlobal, kCont,
-    avCelda, avModa, avCiclo, avGlobal, kAvance,
-    tuCelda, tuModa, tuSede, kTurno,
+    D, lam, lamN, factorK, LAG, ND, NT, NM, NC,
+    celda, porCarrera, porModa, porCond, porCicloPar, porCiclo, contGlobal, kCont,
+    avCelda, avModa, avCond, avCiclo, avGlobal, kAvance,
+    tuCelda, tuCond, tuModa, tuSede, kTurno,
     ntCelda, ntCarModaPar, ntCarModa, ntSedeModaPar, ntSedeModa, ntSede, ntGlobal, kNuevos,
     nmCelda, nmCarPar, nmCar, nmSedePar, nmSede, nmGlobal, kModalidad,
     // Apertura por índice de sede; la interfaz la amplía con las sedes nuevas
@@ -301,6 +306,7 @@ function estimar(D, lam, lamN, factorK) {
     iC: new Map(D.carreras.map((v, i) => [v, i])),
     iM: new Map(D.modalidades.map((v, i) => [v, i])),
     iT: new Map(D.turnos.map((v, i) => [v, i])),
+    iD: new Map(D.condiciones.map((v, i) => [v, i])),
     cacheQ: new Map(), cacheAv: new Map(), cacheTu: new Map(),
     cacheNt: new Map(), cacheNm: new Map(),
   };
@@ -310,25 +316,28 @@ function estimar(D, lam, lamN, factorK) {
 
 /**
  * Tasa de continuación con rezago L y su tamaño muestral efectivo.
- * Escalera: global -> ciclo -> ciclo·paridad -> modalidad·ciclo·paridad
- * -> carrera·modalidad·ciclo·paridad -> celda.
- * La modalidad entra justo después de la estructura por ciclo porque es el
- * segundo factor en importancia: en el ciclo 1 la continuación va del 42 % a
- * distancia al 71 % presencial. Una carrera o sede sin historia propia se
- * detiene en el último nivel con evidencia, que es lo que permite proyectar
+ * Escalera: global -> ciclo -> ciclo·paridad -> condición·ciclo·paridad
+ * -> condición·modalidad·ciclo·paridad
+ * -> condición·modalidad·carrera·ciclo·paridad -> celda.
+ * La condición de llegada va justo detrás de la estructura por ciclo porque es
+ * el factor de mayor magnitud: a igualdad de ciclo y modalidad, los momios de
+ * continuar de un reiniciado son la quinta parte de los de un regular. La
+ * modalidad va inmediatamente después. Una carrera o sede sin historia propia
+ * se detiene en el último nivel con evidencia, que es lo que permite proyectar
  * programas y sedes nuevos.
  */
-function tasaQ(E, is, ic, im, ciclo, par, L) {
-  const ck = is + ',' + ic + ',' + im + ',' + ciclo + ',' + par + ',' + L;
+function tasaQ(E, is, ic, im, id, ciclo, par, L) {
+  const ck = is + ',' + ic + ',' + im + ',' + id + ',' + ciclo + ',' + par + ',' + L;
   const hit = E.cacheQ.get(ck); if (hit) return hit;
   const i = L - 1, LAG = E.LAG;
   const cl = Math.min(ciclo, E.D.cicloMax);
   const cadena = [
     [E.porCiclo.get(String(cl)), E.kCont.ciclo[i]],
     [E.porCicloPar.get(cl + '|' + par), E.kCont.ciclopar[i]],
-    [E.porModa.get(im + '|' + cl + '|' + par), E.kCont.moda[i]],
-    [E.porCarrera.get(ic + '|' + im + '|' + cl + '|' + par), E.kCont.carrera[i]],
-    [E.celda.get(is + '|' + ic + '|' + im + '|' + cl + '|' + par), E.kCont.celda[i]],
+    [E.porCond.get(id + '|' + cl + '|' + par), E.kCont.cond[i]],
+    [E.porModa.get(im + '|' + id + '|' + cl + '|' + par), E.kCont.moda[i]],
+    [E.porCarrera.get(ic + '|' + im + '|' + id + '|' + cl + '|' + par), E.kCont.carrera[i]],
+    [E.celda.get(is + '|' + ic + '|' + im + '|' + id + '|' + cl + '|' + par), E.kCont.celda[i]],
   ];
   let est = E.contGlobal[i], nef = 0;
   for (const [a, k] of cadena) {
@@ -393,21 +402,22 @@ function topeSede(E, is, T) {
   return Math.max(0, ap.cicloBase + (indicePeriodo(T) - indicePeriodo(ap.inicio)));
 }
 
-function avanceDe(E, ic, im, ciclo) {
-  const ck = ic + ',' + im + ',' + ciclo;
+function avanceDe(E, ic, im, id, ciclo) {
+  const ck = ic + ',' + im + ',' + id + ',' + ciclo;
   const hit = E.cacheAv.get(ck); if (hit) return hit;
   const cl = Math.min(ciclo, E.D.cicloMax);
   const raiz = E.avCiclo.get(String(cl)) || E.avGlobal;
   const r = cascada([
-    ['modalidad', E.avModa.get(im + '|' + cl)],
-    ['celda', E.avCelda.get(ic + '|' + im + '|' + cl)],
+    ['condición', E.avCond.get(id + '|' + cl)],
+    ['condición·modalidad', E.avModa.get(im + '|' + id + '|' + cl)],
+    ['celda', E.avCelda.get(ic + '|' + im + '|' + id + '|' + cl)],
   ], raiz, E.kAvance);
   E.cacheAv.set(ck, r);
   return r;
 }
 
-function turnoDe(E, is, im, ciclo, it) {
-  const ck = is + ',' + im + ',' + ciclo + ',' + it;
+function turnoDe(E, is, im, id, ciclo, it) {
+  const ck = is + ',' + im + ',' + id + ',' + ciclo + ',' + it;
   const hit = E.cacheTu.get(ck); if (hit) return hit;
   const cl = Math.min(ciclo, E.D.cicloMax);
   const raiz = E.tuSede.get(is + '|' + it);
@@ -418,7 +428,8 @@ function turnoDe(E, is, im, ciclo, it) {
   } else {
     r = cascada([
       ['sede·modalidad', E.tuModa.get(is + '|' + im + '|' + it)],
-      ['celda', E.tuCelda.get(is + '|' + im + '|' + cl + '|' + it)],
+      ['sede·modalidad·condición', E.tuCond.get(is + '|' + im + '|' + id + '|' + it)],
+      ['celda', E.tuCelda.get(is + '|' + im + '|' + id + '|' + cl + '|' + it)],
     ], raiz, E.kTurno);
   }
   E.cacheTu.set(ck, r);
@@ -511,18 +522,23 @@ function proyectar(E, stock0, nuevos, periodos, shock, conVar) {
       if (!st) continue;
       const vr = conVar ? (hvar.get(Tori) || new Map()) : null;
       const parO = Tori % 100;
+      /* La condición del estudiante en el semestre de DESTINO la fija el propio
+         rezago del flujo: rezago 1 = regular, 2 = reiniciado, 3 o más =
+         recuperado. No hay parámetro que estimar ni dato que declarar. */
+      const idDest = L === 1 ? 1 : (L === 2 ? 2 : 3);
       st.forEach((val, clave) => {
         if (val <= 0) return;
         const pz = clave.split('|');
-        const is = +pz[0], ic = +pz[1], im = +pz[2], ciclo = +pz[3], it = +pz[4];
-        let [qq, nq] = tasaQ(E, is, ic, im, ciclo, parO, L);
+        const is = +pz[0], ic = +pz[1], im = +pz[2], id = +pz[3],
+          ciclo = +pz[4], it = +pz[5];
+        let [qq, nq] = tasaQ(E, is, ic, im, id, ciclo, parO, L);
         if (shock) {
           const lo = Math.log(qq / (1 - qq)) + shock;
           qq = 1 / (1 + Math.exp(-lo));
         }
         if (qq <= 0) return;
-        const [av, na] = avanceDe(E, ic, im, ciclo);
-        const [tt, nt] = turnoDe(E, is, im, ciclo, it);
+        const [av, na] = avanceDe(E, ic, im, id, ciclo);
+        const [tt, nt] = turnoDe(E, is, im, id, ciclo, it);
         const tope = Math.min(planPorIc[ic] || D.planDefecto, topeMaduracion[is]);
         const vx = conVar ? (vr.get(clave) || 0) : 0;
         for (let di = 0; di < ND; di++) {
@@ -533,7 +549,7 @@ function proyectar(E, stock0, nuevos, periodos, shock, conVar) {
           for (let ti = 0; ti < NT; ti++) {
             if (tt[ti] <= 0) continue;
             const phi = qq * av[di] * tt[ti];
-            const k2 = is + '|' + ic + '|' + im + '|' + c2 + '|' + ti;
+            const k2 = is + '|' + ic + '|' + im + '|' + idDest + '|' + c2 + '|' + ti;
             dest.set(k2, (dest.get(k2) || 0) + val * phi);
             if (conVar) {
               const vReal = val * phi * (1 - phi);
@@ -556,7 +572,8 @@ function proyectar(E, stock0, nuevos, periodos, shock, conVar) {
       const [mz, nm] = mezclaNuevos(E, is, ic, im, ciclo, par);
       for (let ti = 0; ti < NT; ti++) {
         if (mz[ti] <= 0) continue;
-        const k2 = is + '|' + ic + '|' + im + '|' + ciclo + '|' + ti;
+        // El ingresante ocupa la condición 0 y sólo durante su primer semestre.
+        const k2 = is + '|' + ic + '|' + im + '|0|' + ciclo + '|' + ti;
         dest.set(k2, (dest.get(k2) || 0) + cant * mz[ti]);
         if (conVar) {
           dvar.set(k2, (dvar.get(k2) || 0)

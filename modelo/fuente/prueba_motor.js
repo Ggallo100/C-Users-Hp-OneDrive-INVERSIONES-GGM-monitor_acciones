@@ -6,9 +6,9 @@
  * los mismos hiperparámetros y escribe `../paridad_py.json`. Este script
  * repite el ejercicio en JavaScript y compara.
  *
- * El estado es (sede, carrera, modalidad, ciclo, turno); la clave del mapa de
- * stock es 'is|ic|im|ciclo|it'. Cualquier divergencia en ese formato aparece
- * aquí como celdas a cero, no como una diferencia pequeña.
+ * El estado es (sede, carrera, modalidad, condición, ciclo, turno); la clave
+ * del mapa de stock es 'is|ic|im|id|ciclo|it'. Cualquier divergencia en ese
+ * formato aparece aquí como celdas a cero, no como una diferencia pequeña.
  */
 const fs = require('fs');
 const path = require('path');
@@ -28,7 +28,7 @@ const D = leer('compacto.json');
 const PAR = leer('parametros.json');
 const PY = leer('paridad_py.json');
 
-const LAM = 0.65, LAM_N = 0.30, FK = 1.0;
+const LAM = 0.90, LAM_N = 0.30, FK = 1.0;
 let peor = 0;
 const abs = (a, b) => Math.abs(a - b);
 const rel = (a, b) => Math.abs(a - b) / Math.max(Math.abs(b), 1);
@@ -51,6 +51,7 @@ E.nSedes = D.sedes.length;
 console.log('\n--- constantes de contracción ---');
 [['celda (rezago 1)', E.kCont.celda[0], PY.k.celda],
 ['modalidad (rezago 1)', E.kCont.moda[0], PY.k.moda],
+['condición (rezago 1)', E.kCont.cond[0], PY.k.cond],
 ['avance', E.kAvance, PY.k.avance],
 ['turno', E.kTurno, PY.k.turno],
 ['turno de ingresantes', E.kNuevos, PY.k.nuevos],
@@ -65,10 +66,10 @@ E.contGlobal.forEach((v, i) => marca(rel(v, PAR.cont_global[i])));
 
 // ---- stock inicial e ingresantes -----------------------------------------
 const stock0 = new Map();
-for (const [ip, is, ic, im, ci, it, v] of D.stock) {
+for (const [ip, is, ic, im, id, ci, it, v] of D.stock) {
   const p = D.periodos[ip];
   if (!stock0.has(p)) stock0.set(p, new Map());
-  stock0.get(p).set(is + '|' + ic + '|' + im + '|' + ci + '|' + it, v);
+  stock0.get(p).set(is + '|' + ic + '|' + im + '|' + id + '|' + ci + '|' + it, v);
 }
 /* Mismo supuesto que paridad.py: repetir el último ingreso observado del
    semestre de la misma paridad, con su composición por modalidad. */
@@ -100,15 +101,20 @@ for (const T of fut) {
     Math.sqrt(v).toFixed(6), Math.sqrt(r.var).toFixed(6), marca(rel(Math.sqrt(v), Math.sqrt(r.var))));
 }
 
-console.log('\n--- desglose por modalidad (la dimensión añadida al estado) ---');
-for (const T of fut) {
-  const acc = D.modalidades.map(() => 0);
-  cen.get(T).forEach((v, k) => { acc[+k.split('|')[2]] += v; });
-  const r = PY.porMod[String(T)];
-  console.log('  %s  %s', T, D.modalidades.map((m, i) =>
-    m + ' ' + acc[i].toFixed(3) + ' / ' + r[m].toFixed(3) +
-    ' (' + marca(rel(acc[i], r[m])) + ')').join('   '));
-}
+const desglose = (titulo, etiquetas, pos, ref) => {
+  console.log('\n--- desglose por %s ---', titulo);
+  for (const T of fut) {
+    const acc = etiquetas.map(() => 0);
+    cen.get(T).forEach((v, k) => { acc[+k.split('|')[pos]] += v; });
+    const r = ref[String(T)];
+    console.log('  %s  %s', T, etiquetas.map((m, i) =>
+      m + ' ' + acc[i].toFixed(3) + ' / ' + r[m].toFixed(3) +
+      ' (' + marca(rel(acc[i], r[m])) + ')').join('   '));
+  }
+};
+desglose('modalidad', D.modalidades, 2, PY.porMod);
+desglose('condición de llegada (la dimensión añadida al estado)',
+  D.condiciones, 3, PY.porCond);
 
 /* La comparación es relativa: `compacto.json` redondea los conteos a cuatro
    decimales y los dos motores los reagregan en distinto orden, así que un

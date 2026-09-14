@@ -33,13 +33,23 @@ DELTAS = [-1, 0, 1, 2, 3]
 # =============================================================================
 # 1. Panel y transiciones
 # =============================================================================
+CACHE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "hist.pkl")
+
+
 def cargar():
-    try:
-        return pd.read_pickle("hist.pkl")
-    except Exception:
-        df = pd.read_excel(RUTA, sheet_name="Anexar1", engine="openpyxl")
-        df.to_pickle("hist.pkl")
-        return df
+    """
+    Lee el histórico del Excel de origen, con caché en disco.
+
+    Leer el .xlsx tarda más de un minuto y la canalización lo recorre decenas de
+    veces (una por punto de la rejilla de λ y por origen del backtesting), así
+    que se guarda un pickle junto al script. Al cambiar el Excel de origen hay
+    que borrar `hist.pkl` para que se regenere.
+    """
+    if os.path.exists(CACHE):
+        return pd.read_pickle(CACHE)
+    df = pd.read_excel(RUTA, sheet_name="Anexar1", engine="openpyxl")
+    df.to_pickle(CACHE)
+    return df
 
 
 def panel(df):
@@ -61,7 +71,35 @@ def panel(df):
     b["cicloSig"] = g["Ciclo"].shift(-1)
     b["turnoSig"] = g["Turno"].shift(-1)
     b["rezago"] = b["tSig"] - b["t"]
+    b["condicion"] = condicion_de(b, g)
     return b, per, idx
+
+
+CONDICIONES = ["Ingresante", "Regular", "Reiniciado", "Recuperado"]
+
+
+def condicion_de(b, g):
+    """
+    Condición de llegada de cada matrícula, según la brecha con la matrícula
+    anterior del mismo estudiante:
+
+        Ingresante  primera matrícula (campo Nuevos de la base)
+        Regular     se matriculó también el semestre inmediato anterior
+        Reiniciado  interrumpió exactamente un semestre y volvió
+        Recuperado  interrumpió dos o más semestres y volvió
+
+    Los registros sin matrícula previa dentro de la ventana y no marcados como
+    ingresantes están censurados por la izquierda: el estudiante ya estaba
+    matriculado antes de que empiece la base. Se les asigna «Regular», que es
+    la categoría a la que más se parecen (82,8 % de continuación frente al
+    85,2 % de los regulares). Son el 62,9 % de 2023-I y menos del 0,2 % de
+    2026-II, y la ponderación de recencia les da un peso mínimo.
+    """
+    brecha = b["t"] - g["t"].shift(1)
+    cond = np.where(b["esNuevo"].values == 1, "Ingresante",
+                    np.where(brecha.values == 2, "Reiniciado",
+                             np.where(brecha.values >= 3, "Recuperado", "Regular")))
+    return cond
 
 
 def clasifica_delta(d):
@@ -118,8 +156,8 @@ def pesos(b, tmax, lam):
 
 def tabla_continuacion(b, nper, lam):
     """
-    Conteos ponderados de continuación por (sede, carrera, modalidad, ciclo,
-    par) y rezago.
+    Conteos ponderados de continuación por (sede, carrera, modalidad,
+    condición de llegada, ciclo, par) y rezago.
 
     Censura: un origen en t entra en el conjunto de riesgo del rezago L sólo si
     t+L cae dentro de la ventana observada; sin ese control los rezagos largos
@@ -131,11 +169,12 @@ def tabla_continuacion(b, nper, lam):
     sede = b["Sede"].values
     carr = b["Carrera"].values
     moda = b["Modalidad_estudios"].values
+    cond = b["condicion"].values
     cic = b["Ciclo"].values.astype(int)
     par = b["par"].values.astype(int)
     filas = {}
     for i in range(len(b)):
-        f = filas.setdefault((sede[i], carr[i], moda[i], cic[i], par[i]),
+        f = filas.setdefault((sede[i], carr[i], moda[i], cond[i], cic[i], par[i]),
                              [np.zeros(LAG_MAX), np.zeros(LAG_MAX)])
         for L in range(1, LAG_MAX + 1):
             if tt[i] + L <= nper - 1:
@@ -144,22 +183,25 @@ def tabla_continuacion(b, nper, lam):
             L = int(rz[i])
             if 1 <= L <= LAG_MAX:
                 f[1][L - 1] += w[i]
-    return [{"sede": k[0], "carrera": k[1], "moda": k[2], "ciclo": k[3], "par": k[4],
-             "n": v[0], "k": v[1]} for k, v in filas.items()]
+    return [{"sede": k[0], "carrera": k[1], "moda": k[2], "cond": k[3],
+             "ciclo": k[4], "par": k[5], "n": v[0], "k": v[1]}
+            for k, v in filas.items()]
 
 
 def tabla_avance(b, nper, lam):
     r = b[b["tSig"].notna()].copy()
     r["w"] = pesos(r, nper - 1, lam)
     r["delta"] = (r["cicloSig"] - r["Ciclo"]).map(clasifica_delta)
-    return (r.groupby(["Carrera", "Modalidad_estudios", "Ciclo", "delta"])["w"].sum()
+    return (r.groupby(["Carrera", "Modalidad_estudios", "condicion", "Ciclo",
+                       "delta"])["w"].sum()
             .unstack("delta", fill_value=0.0).reindex(columns=DELTAS, fill_value=0.0))
 
 
 def tabla_turno(b, turnos, nper, lam):
     r = b[b["tSig"].notna()].copy()
     r["w"] = pesos(r, nper - 1, lam)
-    return (r.groupby(["Sede", "Modalidad_estudios", "Ciclo", "Turno", "turnoSig"])["w"].sum()
+    return (r.groupby(["Sede", "Modalidad_estudios", "condicion", "Ciclo", "Turno",
+                       "turnoSig"])["w"].sum()
             .unstack("turnoSig", fill_value=0.0).reindex(columns=turnos, fill_value=0.0))
 
 
@@ -201,16 +243,22 @@ def varianza_proceso(b, nper):
                     NO se cancela al agregar: es el motor de los escenarios.
 
     Modelo auxiliar: GLM binomial con enlace logit,
-        logit P(continúa) = mu + a_ciclo + b_modalidad + g_periodo
+        logit P(continúa) = mu + a_ciclo + b_modalidad + c_condicion + g_periodo
     La paridad queda anidada en el periodo (incluirla aparte daría un diseño de
     rango deficiente), así que se extrae después proyectando los efectos de
     periodo sobre la paridad; el residuo es el choque estocástico.
 
-    La modalidad entra como control porque su composición está en fuerte deriva
-    —la modalidad a distancia pasa del 4,8 % al 19,6 % de la matrícula— y su
-    continuación es muy distinta. Sin controlarla, parte de ese cambio de
+    La modalidad y la condición de llegada entran como controles por la misma
+    razón: ambas afectan con fuerza a la probabilidad de continuar y su
+    composición se mueve con el tiempo. Sin controlarlas, ese cambio de
     composición se contabilizaría como choque de periodo y ensancharía los
-    escenarios con variación que en realidad es predecible.
+    escenarios con variación que en realidad es predecible. Controlar las dos
+    reduce sigma del choque de 0,1026 a 0,0537: la mitad de lo que se medía como
+    volatilidad del entorno era composición mal atribuida.
+
+    El control tiene que cubrir exactamente lo que condiciona el modelo de
+    puntos; si el GLM ignorase una dimensión del estado, los escenarios
+    recogerían como incertidumbre algo que la proyección ya sabe.
     """
     import statsmodels.api as sm
     import statsmodels.formula.api as smf
@@ -220,11 +268,12 @@ def varianza_proceso(b, nper):
     r["cont"] = (r["rezago"] == 1).fillna(False).astype(int)
     r["ciclo_f"] = r["Ciclo"].astype(str)
     r["moda_f"] = r["Modalidad_estudios"].astype(str)
+    r["cond_f"] = r["condicion"].astype(str)
     r["periodo_f"] = r["Periodo_real"].astype(str)
 
-    mod = smf.glm("cont ~ C(ciclo_f) + C(moda_f) + C(periodo_f)", data=r,
+    mod = smf.glm("cont ~ C(ciclo_f) + C(moda_f) + C(cond_f) + C(periodo_f)", data=r,
                   family=sm.families.Binomial()).fit()
-    base = smf.glm("cont ~ C(ciclo_f) + C(moda_f)", data=r,
+    base = smf.glm("cont ~ C(ciclo_f) + C(moda_f) + C(cond_f)", data=r,
                    family=sm.families.Binomial()).fit()
 
     per_o = sorted(r["Periodo_real"].unique())
@@ -283,6 +332,9 @@ def construir_parametros(b, per, hasta=None, lam=0.50, lam_n=0.30):
     bb["cicloSig"] = g["Ciclo"].shift(-1)
     bb["turnoSig"] = g["Turno"].shift(-1)
     bb["rezago"] = bb["tSig"] - bb["t"]
+    # La condición se recalcula DENTRO de la ventana truncada: en el backtesting
+    # el modelo sólo puede saber lo que se observa hasta el corte.
+    bb["condicion"] = condicion_de(bb, g)
 
     turnos = sorted(bb["Turno"].unique())
     sedes = sorted(bb["Sede"].unique())
@@ -293,11 +345,13 @@ def construir_parametros(b, per, hasta=None, lam=0.50, lam_n=0.30):
 
     # --- continuación ------------------------------------------------------
     # Escalera de contracción, del nivel más agregado al más fino:
-    #   global -> ciclo -> ciclo·par -> modalidad·ciclo·par
-    #          -> carrera·modalidad·ciclo·par -> celda(sede,...)
-    # La modalidad entra justo después de la estructura por ciclo porque es el
-    # segundo factor en importancia: en el ciclo 1 la continuación va del 42 %
-    # a distancia al 71 % presencial.
+    #   global -> ciclo -> ciclo·par -> condición·ciclo·par
+    #          -> condición·modalidad·ciclo·par
+    #          -> condición·modalidad·carrera·ciclo·par -> celda(sede,...)
+    # La condición de llegada entra justo después de la estructura por ciclo
+    # porque es el factor de mayor magnitud: a igualdad de ciclo y modalidad,
+    # las probabilidades de continuar de un reiniciado son la quinta parte de
+    # las de un regular (razón de momios 0,21). La modalidad va detrás.
     tab = tabla_continuacion(bb, nper, lam)
     dfc = pd.DataFrame(tab)
     for L in range(LAG_MAX):
@@ -305,8 +359,9 @@ def construir_parametros(b, per, hasta=None, lam=0.50, lam_n=0.30):
         dfc[f"k{L}"] = dfc["k"].str[L]
     cols = [f"n{L}" for L in range(LAG_MAX)] + [f"k{L}" for L in range(LAG_MAX)]
     niv = {
-        "carrera": dfc.groupby(["carrera", "moda", "ciclo", "par"])[cols].sum(),
-        "moda": dfc.groupby(["moda", "ciclo", "par"])[cols].sum(),
+        "carrera": dfc.groupby(["carrera", "moda", "cond", "ciclo", "par"])[cols].sum(),
+        "moda": dfc.groupby(["moda", "cond", "ciclo", "par"])[cols].sum(),
+        "cond": dfc.groupby(["cond", "ciclo", "par"])[cols].sum(),
         "ciclopar": dfc.groupby(["ciclo", "par"])[cols].sum(),
         "ciclo": dfc.groupby(["ciclo"])[cols].sum(),
     }
@@ -320,28 +375,40 @@ def construir_parametros(b, per, hasta=None, lam=0.50, lam_n=0.30):
                        "k": R4([d[f"k{L}"][key] for L in range(LAG_MAX)])}
         return out
 
-    cont_celda = {f"{r['sede']}|{r['carrera']}|{r['moda']}|{r['ciclo']}|{r['par']}":
-                  {"n": R4(r["n"]), "k": R4(r["k"])} for r in tab}
-    ks = {"celda": [], "carrera": [], "moda": [], "ciclopar": [], "ciclo": []}
+    cont_celda = {
+        f"{r['sede']}|{r['carrera']}|{r['moda']}|{r['cond']}|{r['ciclo']}|{r['par']}":
+        {"n": R4(r["n"]), "k": R4(r["k"])} for r in tab}
+    ks = {"celda": [], "carrera": [], "moda": [], "cond": [], "ciclopar": [], "ciclo": []}
     for L in range(LAG_MAX):
         ks["celda"].append(k_betabinom(dfc[f"k{L}"], dfc[f"n{L}"]))
-        for nom in ("carrera", "moda", "ciclopar", "ciclo"):
+        for nom in ("carrera", "moda", "cond", "ciclopar", "ciclo"):
             ks[nom].append(k_betabinom(niv[nom][f"k{L}"], niv[nom][f"n{L}"]))
 
     # --- avance de ciclo ---------------------------------------------------
-    # celda(carrera,modalidad,ciclo) -> modalidad·ciclo -> ciclo -> global
+    # global -> ciclo -> condición·ciclo -> condición·modalidad·ciclo
+    #        -> celda(carrera,modalidad,condición,ciclo)
+    # El reiniciado repite ciclo el doble que el regular (18,3 % frente a
+    # 9,2 %) y avanza un ciclo mucho menos (69,1 % frente a 85,0 %): vuelve a
+    # arrastrar los cursos que dejó.
     av = tabla_avance(bb, nper, lam)
-    av_celda = {f"{c}|{m}|{ci}": R4(av.loc[(c, m, ci)].values) for (c, m, ci) in av.index}
-    avm = av.groupby(level=["Modalidad_estudios", "Ciclo"]).sum()
-    av_moda = {f"{m}|{ci}": R4(avm.loc[(m, ci)].values) for (m, ci) in avm.index}
+    av_celda = {f"{c}|{m}|{cd}|{ci}": R4(av.loc[(c, m, cd, ci)].values)
+                for (c, m, cd, ci) in av.index}
+    avm = av.groupby(level=["Modalidad_estudios", "condicion", "Ciclo"]).sum()
+    av_moda = {f"{m}|{cd}|{ci}": R4(avm.loc[(m, cd, ci)].values) for (m, cd, ci) in avm.index}
+    avd = av.groupby(level=["condicion", "Ciclo"]).sum()
+    av_cond = {f"{cd}|{ci}": R4(avd.loc[(cd, ci)].values) for (cd, ci) in avd.index}
     avc = av.groupby(level="Ciclo").sum()
     av_ciclo = {str(ci): R4(avc.loc[ci].values) for ci in avc.index}
 
     # --- turno -------------------------------------------------------------
-    # celda(sede,modalidad,ciclo,turno) -> sede·modalidad·turno -> sede·turno
+    # sede·turno -> sede·modalidad·turno -> sede·modalidad·condición·turno
+    #            -> celda(sede,modalidad,condición,ciclo,turno)
     tu = tabla_turno(bb, turnos, nper, lam)
-    tu_celda = {f"{s}|{m}|{ci}|{t}": R4(tu.loc[(s, m, ci, t)].values)
-                for (s, m, ci, t) in tu.index}
+    tu_celda = {f"{s}|{m}|{cd}|{ci}|{t}": R4(tu.loc[(s, m, cd, ci, t)].values)
+                for (s, m, cd, ci, t) in tu.index}
+    tud = tu.groupby(level=["Sede", "Modalidad_estudios", "condicion", "Turno"]).sum()
+    tu_cond = {f"{s}|{m}|{cd}|{t}": R4(tud.loc[(s, m, cd, t)].values)
+               for (s, m, cd, t) in tud.index}
     tum = tu.groupby(level=["Sede", "Modalidad_estudios", "Turno"]).sum()
     tu_moda = {f"{s}|{m}|{t}": R4(tum.loc[(s, m, t)].values) for (s, m, t) in tum.index}
     tus = tu.groupby(level=["Sede", "Turno"]).sum()
@@ -402,16 +469,20 @@ def construir_parametros(b, per, hasta=None, lam=0.50, lam_n=0.30):
         "cont_celda": cont_celda,
         "cont_carrera": a_dict(niv["carrera"]),
         "cont_moda": a_dict(niv["moda"]),
+        "cont_cond": a_dict(niv["cond"]),
         "cont_ciclopar": a_dict(niv["ciclopar"]),
         "cont_ciclo": a_dict(niv["ciclo"]),
         "cont_global": [float(glob[f"k{L}"]) / max(float(glob[f"n{L}"]), 1e-9)
                         for L in range(LAG_MAX)],
         "k_celda": ks["celda"], "k_carrera": ks["carrera"], "k_moda": ks["moda"],
-        "k_ciclopar": ks["ciclopar"], "k_ciclo": ks["ciclo"],
-        "av_celda": av_celda, "av_moda": av_moda, "av_ciclo": av_ciclo,
+        "k_cond": ks["cond"], "k_ciclopar": ks["ciclopar"], "k_ciclo": ks["ciclo"],
+        "condiciones": CONDICIONES,
+        "av_celda": av_celda, "av_moda": av_moda, "av_cond": av_cond,
+        "av_ciclo": av_ciclo,
         "av_global": R4(av.sum().values),
         "k_avance": k_dirichlet(np.array(list(av_celda.values()), float)),
-        "tu_celda": tu_celda, "tu_moda": tu_moda, "tu_sede": tu_sede,
+        "tu_celda": tu_celda, "tu_cond": tu_cond, "tu_moda": tu_moda,
+        "tu_sede": tu_sede,
         "k_turno": k_dirichlet(np.array(list(tu_celda.values()), float)),
         "nt_celda": nt_celda,
         "nt_carrera_moda_par": {f"{s}|{c}|{m}|{pa}": R4(g1.loc[(s, c, m, pa)].values)
@@ -465,13 +536,17 @@ class Modelo:
         self.p = par
         self.turnos = par["turnos"]
         self.modalidades = par.get("modalidades", [])
+        # Las condiciones pueden venir como nombres (la canalización de Python)
+        # o como índices en texto (el arnés de paridad, que lee compacto.json).
+        # El motor no necesita saber cuál: sólo respeta el orden.
+        self.condiciones = par.get("condiciones", CONDICIONES)
         self.fk = factor_k
         self._cq = {}
 
     # --- parámetros contraídos --------------------------------------------
-    def q(self, sede, carrera, moda, ciclo, parid, L):
+    def q(self, sede, carrera, moda, cond, ciclo, parid, L):
         """Tasa de continuación contraída y su tamaño muestral efectivo."""
-        ck = (sede, carrera, moda, ciclo, parid, L)
+        ck = (sede, carrera, moda, cond, ciclo, parid, L)
         if ck in self._cq:
             return self._cq[ck]
         p = self.p
@@ -480,9 +555,12 @@ class Modelo:
         cadena = [
             (p["cont_ciclo"].get(cl), p["k_ciclo"][i] * self.fk),
             (p["cont_ciclopar"].get(f"{cl}|{parid}"), p["k_ciclopar"][i] * self.fk),
-            (p["cont_moda"].get(f"{moda}|{cl}|{parid}"), p["k_moda"][i] * self.fk),
-            (p["cont_carrera"].get(f"{carrera}|{moda}|{cl}|{parid}"), p["k_carrera"][i] * self.fk),
-            (p["cont_celda"].get(f"{sede}|{carrera}|{moda}|{cl}|{parid}"), p["k_celda"][i] * self.fk),
+            (p["cont_cond"].get(f"{cond}|{cl}|{parid}"), p["k_cond"][i] * self.fk),
+            (p["cont_moda"].get(f"{moda}|{cond}|{cl}|{parid}"), p["k_moda"][i] * self.fk),
+            (p["cont_carrera"].get(f"{carrera}|{moda}|{cond}|{cl}|{parid}"),
+             p["k_carrera"][i] * self.fk),
+            (p["cont_celda"].get(f"{sede}|{carrera}|{moda}|{cond}|{cl}|{parid}"),
+             p["k_celda"][i] * self.fk),
         ]
         est = p["cont_global"][i]
         nef = 0.0
@@ -543,17 +621,18 @@ class Modelo:
         # aún no ofrece ningún ciclo.
         return max(0, ap["cicloBase"] + (indice_periodo(T) - indice_periodo(ap["inicio"])))
 
-    def avance(self, carrera, moda, ciclo):
+    def avance(self, carrera, moda, cond, ciclo):
         p = self.p
         cl = str(min(ciclo, p["cicloMax"]))
         raiz = p["av_ciclo"].get(cl, p["av_global"])
         v, nef, _ = self._cascada([
-            ("modalidad", p["av_moda"].get(f"{moda}|{cl}")),
-            ("celda", p["av_celda"].get(f"{carrera}|{moda}|{cl}")),
+            ("condición", p["av_cond"].get(f"{cond}|{cl}")),
+            ("condición·modalidad", p["av_moda"].get(f"{moda}|{cond}|{cl}")),
+            ("celda", p["av_celda"].get(f"{carrera}|{moda}|{cond}|{cl}")),
         ], raiz, p["k_avance"] * self.fk)
         return v, nef
 
-    def turno_trans(self, sede, moda, ciclo, turno):
+    def turno_trans(self, sede, moda, cond, ciclo, turno):
         p = self.p
         cl = str(min(ciclo, p["cicloMax"]))
         raiz = p["tu_sede"].get(f"{sede}|{turno}")
@@ -563,7 +642,8 @@ class Modelo:
             return v, 1e6
         v, nef, _ = self._cascada([
             ("sede·modalidad", p["tu_moda"].get(f"{sede}|{moda}|{turno}")),
-            ("celda", p["tu_celda"].get(f"{sede}|{moda}|{cl}|{turno}")),
+            ("sede·modalidad·condición", p["tu_cond"].get(f"{sede}|{moda}|{cond}|{turno}")),
+            ("celda", p["tu_celda"].get(f"{sede}|{moda}|{cond}|{cl}|{turno}")),
         ], raiz, p["k_turno"] * self.fk)
         return v, nef
 
@@ -604,10 +684,16 @@ class Modelo:
     # --- proyección --------------------------------------------------------
     def proyectar(self, stock0, nuevos, periodos, shock=0.0, varianza=False):
         """
-        stock0  : {periodo: {(sede,carrera,modalidad,ciclo,turno): valor}}.
+        stock0  : {periodo: {(sede,carrera,modalidad,condición,ciclo,turno): valor}}.
         nuevos  : {periodo: {(sede,carrera,modalidad,ciclo): cantidad}}.
         shock   : desplazamiento sistémico en escala logit sobre q_L.
         varianza: si True devuelve también la varianza INDEPENDIENTE por celda.
+
+        La condición de llegada al semestre de destino la determina el propio
+        rezago del flujo, sin ningún parámetro añadido: quien llega con rezago 1
+        es regular, con rezago 2 reiniciado y con rezago 3 o más recuperado. Los
+        ingresantes del archivo entran con la condición «Ingresante», que ocupan
+        sólo en su primer semestre.
         """
         p = self.p
         hist = {k: dict(v) for k, v in stock0.items()}
@@ -623,20 +709,22 @@ class Modelo:
                     continue
                 vr = hvar.get(Tori, {})
                 parO = Tori % 100
-                for (sede, carrera, moda, ciclo, turno), val in st.items():
+                cond_dest = self.condiciones[1] if L == 1 else (
+                    self.condiciones[2] if L == 2 else self.condiciones[3])
+                for (sede, carrera, moda, cond, ciclo, turno), val in st.items():
                     if val <= 0:
                         continue
-                    qq, nq = self.q(sede, carrera, moda, ciclo, parO, L)
+                    qq, nq = self.q(sede, carrera, moda, cond, ciclo, parO, L)
                     if shock:
                         lo = np.log(qq / (1 - qq)) + shock
                         qq = 1.0 / (1.0 + np.exp(-lo))
                     if qq <= 0:
                         continue
-                    av, na = self.avance(carrera, moda, ciclo)
-                    tt, nt = self.turno_trans(sede, moda, ciclo, turno)
+                    av, na = self.avance(carrera, moda, cond, ciclo)
+                    tt, nt = self.turno_trans(sede, moda, cond, ciclo, turno)
                     tope = min(p["planCiclos"].get(carrera, p["planDefecto"]),
                                self.tope_sede(sede, T))
-                    vx = vr.get((sede, carrera, moda, ciclo, turno), 0.0)
+                    vx = vr.get((sede, carrera, moda, cond, ciclo, turno), 0.0)
                     for di, d in enumerate(DELTAS):
                         if av[di] <= 0:
                             continue
@@ -645,7 +733,7 @@ class Modelo:
                             if tt[ti] <= 0:
                                 continue
                             phi = qq * av[di] * tt[ti]
-                            key = (sede, carrera, moda, c2, t2)
+                            key = (sede, carrera, moda, cond_dest, c2, t2)
                             dest[key] = dest.get(key, 0.0) + val * phi
                             if varianza:
                                 v_real = val * phi * (1 - phi)
@@ -665,7 +753,7 @@ class Modelo:
                 for ti, t2 in enumerate(self.turnos):
                     if mz[ti] <= 0:
                         continue
-                    key = (sede, carrera, moda, ciclo, t2)
+                    key = (sede, carrera, moda, self.condiciones[0], ciclo, t2)
                     dest[key] = dest.get(key, 0.0) + cant * mz[ti]
                     if varianza:
                         dvar[key] = dvar.get(key, 0.0) \
@@ -681,10 +769,10 @@ class Modelo:
 # =============================================================================
 def stock_observado(b):
     t = b.groupby(["Periodo_real", "Sede", "Carrera", "Modalidad_estudios",
-                   "Ciclo", "Turno"]).size()
+                   "condicion", "Ciclo", "Turno"]).size()
     out = {}
-    for (p, s, c, m, ci, tu), v in t.items():
-        out.setdefault(int(p), {})[(s, c, m, int(ci), tu)] = float(v)
+    for (p, s, c, m, cd, ci, tu), v in t.items():
+        out.setdefault(int(p), {})[(s, c, m, cd, int(ci), tu)] = float(v)
     return out
 
 
@@ -706,9 +794,11 @@ def agrega(d, ix):
 
 
 NIVELES = {"Total": (), "Sede": (0,), "Carrera": (1,), "Modalidad": (2,),
+           "Condición": (3,),
            "Sede×Carrera": (0, 1), "Sede×Carrera×Modalidad": (0, 1, 2),
-           "Sede×Carrera×Modalidad×Ciclo": (0, 1, 2, 3),
-           "Sede×Carrera×Modalidad×Ciclo×Turno": (0, 1, 2, 3, 4)}
+           "Sede×Carrera×Modalidad×Condición": (0, 1, 2, 3),
+           "Sede×Carrera×Modalidad×Condición×Ciclo": (0, 1, 2, 3, 4),
+           "Sede×Carrera×Modalidad×Condición×Ciclo×Turno": (0, 1, 2, 3, 4, 5)}
 
 
 def epap(real, prev):

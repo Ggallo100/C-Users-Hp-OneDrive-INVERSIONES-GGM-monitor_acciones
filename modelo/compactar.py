@@ -7,17 +7,25 @@ El motor JavaScript reagrega estos conteos aplicando la ponderación de recencia
 que elija el usuario y vuelve a calcular las constantes de contracción, de modo
 que el modelo se puede reestimar dentro del navegador en vez de venir congelado.
 
-El estado es (sede, carrera, modalidad, ciclo, turno). La modalidad se conserva
-entre semestres —el 99,4 % de los continuadores la mantiene—, igual que la sede
-y la carrera, así que no necesita matriz de transición propia; pero sí entra en
-todas las tablas de conteo porque condiciona con fuerza la continuación, el
-avance de ciclo y el turno.
+El estado es (sede, carrera, modalidad, condición, ciclo, turno). La modalidad
+se conserva entre semestres —el 99,4 % de los continuadores la mantiene—, igual
+que la sede y la carrera, así que no necesita matriz de transición propia; pero
+sí entra en todas las tablas de conteo porque condiciona con fuerza la
+continuación, el avance de ciclo y el turno.
+
+La condición de llegada —regular, reiniciado o recuperado, según si el
+estudiante viene de matricularse el semestre anterior, de una pausa de un
+semestre o de una pausa mayor— no se declara en ningún sitio: la determina el
+rezago del propio flujo. Por eso tampoco necesita matriz de transición, y por
+eso el desglose de continuadores que piden las tablas de resultados sale de la
+recursión sin parámetros añadidos.
 """
 import json
 import numpy as np
 import pandas as pd
 from estimar import (cargar, panel, clasifica_delta, LAG_MAX, DELTAS,
-                     varianza_proceso, stock_observado, nuevos_observados)
+                     varianza_proceso, stock_observado, nuevos_observados,
+                     CONDICIONES)
 
 
 def compactar():
@@ -32,17 +40,19 @@ def compactar():
     iC = {v: i for i, v in enumerate(carreras)}
     iM = {v: i for i, v in enumerate(modalidades)}
     iT = {v: i for i, v in enumerate(turnos)}
+    iD = {v: i for i, v in enumerate(CONDICIONES)}
 
-    # ---- continuación: [is, ic, im, ciclo, par, ip, n0..n3, k0..k3] -------
+    # ---- continuación: [is, ic, im, id, ciclo, par, ip, n0..n3, k0..k3] ---
     cont = {}
     tt = b["t"].values.astype(int)
     rz = b["rezago"].values
     sv, cv = b["Sede"].values, b["Carrera"].values
     mv = b["Modalidad_estudios"].values
+    dv = b["condicion"].values
     civ = b["Ciclo"].values.astype(int)
     pv = b["par"].values.astype(int)
     for i in range(len(b)):
-        key = (iS[sv[i]], iC[cv[i]], iM[mv[i]], civ[i], pv[i], tt[i])
+        key = (iS[sv[i]], iC[cv[i]], iM[mv[i]], iD[dv[i]], civ[i], pv[i], tt[i])
         f = cont.setdefault(key, [0] * (2 * LAG_MAX))
         for L in range(1, LAG_MAX + 1):
             if tt[i] + L <= nper - 1:
@@ -53,19 +63,23 @@ def compactar():
                 f[LAG_MAX + L - 1] += 1             # continuó con rezago L
     filas_cont = [list(k) + v for k, v in sorted(cont.items())]
 
-    # ---- avance de ciclo: [ic, im, ciclo, ip, d(-1..3)] -------------------
+    # ---- avance de ciclo: [ic, im, id, ciclo, ip, d(-1..3)] ---------------
     r = b[b["tSig"].notna()].copy()
     r["delta"] = (r["cicloSig"] - r["Ciclo"]).map(clasifica_delta)
-    av = (r.groupby(["Carrera", "Modalidad_estudios", "Ciclo", "t", "delta"]).size()
+    av = (r.groupby(["Carrera", "Modalidad_estudios", "condicion", "Ciclo", "t",
+                     "delta"]).size()
           .unstack("delta", fill_value=0).reindex(columns=DELTAS, fill_value=0))
-    filas_av = [[iC[c], iM[m], int(ci), int(t)] + [int(x) for x in av.loc[(c, m, ci, t)].values]
-                for (c, m, ci, t) in av.index]
+    filas_av = [[iC[c], iM[m], iD[d], int(ci), int(t)] +
+                [int(x) for x in av.loc[(c, m, d, ci, t)].values]
+                for (c, m, d, ci, t) in av.index]
 
-    # ---- turno: [is, im, ciclo, it, ip, destino...] -----------------------
-    tu = (r.groupby(["Sede", "Modalidad_estudios", "Ciclo", "Turno", "t", "turnoSig"]).size()
+    # ---- turno: [is, im, id, ciclo, it, ip, destino...] -------------------
+    tu = (r.groupby(["Sede", "Modalidad_estudios", "condicion", "Ciclo", "Turno", "t",
+                     "turnoSig"]).size()
           .unstack("turnoSig", fill_value=0).reindex(columns=turnos, fill_value=0))
-    filas_tu = [[iS[s], iM[m], int(ci), iT[t], int(p)] + [int(x) for x in tu.loc[(s, m, ci, t, p)].values]
-                for (s, m, ci, t, p) in tu.index]
+    filas_tu = [[iS[s], iM[m], iD[d], int(ci), iT[t], int(p)] +
+                [int(x) for x in tu.loc[(s, m, d, ci, t, p)].values]
+                for (s, m, d, ci, t, p) in tu.index]
 
     # ---- turno de ingresantes: [is, ic, im, ciclo, par, ip, destino...] ---
     n = b[b["esNuevo"] == 1]
@@ -87,7 +101,7 @@ def compactar():
     # ---- stock y nuevos observados ---------------------------------------
     st = stock_observado(b)
     nu = nuevos_observados(b)
-    filas_st = [[idx[p], iS[k[0]], iC[k[1]], iM[k[2]], k[3], iT[k[4]], int(v)]
+    filas_st = [[idx[p], iS[k[0]], iC[k[1]], iM[k[2]], iD[k[3]], k[4], iT[k[5]], int(v)]
                 for p in per for k, v in sorted(st[p].items())]
     filas_nu = [[idx[p], iS[k[0]], iC[k[1]], iM[k[2]], k[3], int(v)]
                 for p in per for k, v in sorted(nu.get(p, {}).items())]
@@ -123,6 +137,7 @@ def compactar():
 
     return {
         "sedes": sedes, "carreras": carreras, "modalidades": modalidades,
+        "condiciones": CONDICIONES,
         "turnos": turnos, "periodos": [int(p) for p in per],
         "deltas": DELTAS, "lagMax": LAG_MAX,
         "cicloMax": int(b["Ciclo"].max()),

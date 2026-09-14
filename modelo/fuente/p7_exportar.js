@@ -1,7 +1,7 @@
 /* ==========================================================================
    EXPORTACIÓN A EXCEL CON EL SUSTENTO DE LA PROYECCIÓN
    ========================================================================== */
-function exportarExcel() {
+async function exportarExcel() {
   if (!S.proy) { brindis('Primero calcula una proyección', true); return; }
   const P = S.proy, V = S.D.varianza, VA = S.D.validacion;
   const H = c => ({ v: c, e: 1 });
@@ -26,24 +26,25 @@ function exportarExcel() {
     ['Choque sistémico de los escenarios', '±' + nf2.format(P.z * P.sigma) + ' en logit (z=' +
       nf2.format(P.z) + ' · σ=' + nf2.format(P.sigma) + ')'],
     [],
-    ['Semestre', 'Ingresantes', 'Continuadores', 'Pesimista', 'Moderado', 'Optimista',
+    ['Semestre', 'Ingresantes', 'Cont. regulares', 'Cont. reiniciados',
+      'Cont. recuperados', 'Continuadores', 'Pesimista', 'Moderado', 'Optimista',
       'IP inferior', 'IP superior', 'Variación vs. anterior'].map(H),
   ];
-  let prev = S.D.stock.filter(x => x[0] === S.D.periodos.length - 1).reduce((s, x) => s + x[6], 0);
+  let prev = S.D.stock.filter(x => x[0] === S.D.periodos.length - 1).reduce((s, x) => s + x[7], 0);
   P.periodos.forEach(T => {
     const c = sumaMapa(P.cen.get(T)), a = sumaMapa(P.alt.get(T)), b = sumaMapa(P.baj.get(T));
     const sd = Math.sqrt(sumaMapa(P.varz.get(T)));
     const hw = P.z * Math.sqrt(Math.pow((a - b) / 2 / P.z, 2) + sd * sd);
-    const n = nuevosDe(T);
-    r1.push([rotuloPeriodo(T), N0(n), N0(c - n), N0(b), N0(c), N0(a),
-    N0(c - hw), N0(c + hw), PC(c / Math.max(prev, 1) - 1)]);
+    const d = porCondicion(P.cen.get(T));
+    r1.push([rotuloPeriodo(T), N0(d[0]), N0(d[1]), N0(d[2]), N0(d[3]), N0(c - d[0]),
+    N0(b), N0(c), N0(a), N0(c - hw), N0(c + hw), PC(c / Math.max(prev, 1) - 1)]);
     prev = c;
   });
 
   /* ---------- 2. Proyección detallada ---------- */
-  const r2 = [['Semestre', 'Sede', 'Carrera', 'Modalidad', 'Programa nuevo', 'Ciclo', 'Turno',
-    'Pesimista', 'Moderado', 'Optimista', 'Desv. típica independiente',
-    'IP inferior', 'IP superior'].map(H)];
+  const r2 = [['Semestre', 'Sede', 'Carrera', 'Modalidad', 'Condición', 'Programa nuevo',
+    'Ciclo', 'Turno', 'Pesimista', 'Moderado', 'Optimista',
+    'Desv. típica independiente', 'IP inferior', 'IP superior'].map(H)];
   P.periodos.forEach(T => {
     const cen = P.cen.get(T), alt = P.alt.get(T), baj = P.baj.get(T), vz = P.varz.get(T);
     const claves = Array.from(cen.keys()).sort();
@@ -53,7 +54,7 @@ function exportarExcel() {
       const d = descomponer(k), nb = nombreDe(d);
       const a = alt.get(k) || 0, b = baj.get(k) || 0, sd = Math.sqrt(vz.get(k) || 0);
       const hw = P.z * Math.sqrt(Math.pow((a - b) / 2 / P.z, 2) + sd * sd);
-      r2.push([rotuloPeriodo(T), nb.Sede, nb.Carrera, nb.Modalidad,
+      r2.push([rotuloPeriodo(T), nb.Sede, nb.Carrera, nb.Modalidad, nb['Condición'],
         S.carrerasNuevas.has(nb.Carrera) ? 'Sí' : 'No', nb.Ciclo, nb.Turno,
       N0(b), N0(c), N0(a), N2(sd), N0(Math.max(c - hw, 0)), N0(c + hw)]);
     });
@@ -95,6 +96,17 @@ function exportarExcel() {
   agregado('Por semestre, modalidad y ciclo',
     (d, T) => rotuloPeriodo(T) + SEP + S.D.modalidades[d.im] + SEP + String(d.ciclo).padStart(2, '0'),
     ['Semestre', 'Modalidad', 'Ciclo']);
+  /* La condición se prefija con su índice para que el orden del cuadro sea el
+     natural —ingresante, regular, reiniciado, recuperado— y no el alfabético. */
+  const etCond = d => d.id + '. ' + S.D.condiciones[d.id];
+  agregado('Por semestre y continuidad de la matrícula',
+    (d, T) => rotuloPeriodo(T) + SEP + etCond(d), ['Semestre', 'Condición']);
+  agregado('Por semestre, continuidad y ciclo',
+    (d, T) => rotuloPeriodo(T) + SEP + etCond(d) + SEP + String(d.ciclo).padStart(2, '0'),
+    ['Semestre', 'Condición', 'Ciclo']);
+  agregado('Por semestre, sede y continuidad',
+    (d, T) => rotuloPeriodo(T) + SEP + S.sedes[d.is] + SEP + etCond(d),
+    ['Semestre', 'Sede', 'Condición']);
 
   /* ---------- 4. Ingresantes y reparto de turno ---------- */
   const r4 = [
@@ -300,8 +312,9 @@ function exportarExcel() {
     ['comportamiento histórico observado en las trayectorias individuales de los estudiantes.'],
     [],
     [H('2. Ecuación de recursión')],
-    ['M(T,s,c,k,u) = N(T,s,c,k,u) + Σ_L Σ_{k\',u\'} M(T−L,s,c,k\',u\') · q_L · A(k\'→k) · U(u\'→u)'],
-    ['donde T es el semestre, s la sede, c la carrera, k el ciclo y u el turno.'],
+    ['M(T,s,c,m,d,k,u) = N(T,s,c,m,d,k,u) + Σ_L Σ_{k\',u\'} M(T−L,s,c,m,d,k\',u\') · q_L · A(k\'→k) · U(u\'→u)'],
+    ['donde T es el semestre, s la sede, c la carrera, m la modalidad, d la condición de'],
+    ['llegada, k el ciclo y u el turno.'],
     ['q_L es la probabilidad de que la siguiente matrícula ocurra exactamente L semestres después,'],
     ['A la distribución del salto de ciclo y U la matriz de transición de turno.'],
     [],
@@ -331,13 +344,29 @@ function exportarExcel() {
     ['El archivo de entrada puede declarar la modalidad; si no lo hace, el modelo la reparte con'],
     ['la composición histórica de la sede y la carrera, contraída por niveles.'],
     [],
-    [H('6. Programas nuevos')],
+    [H('6. Continuidad de la matrícula')],
+    ['Los continuadores se clasifican por cómo llegaron al semestre, y esa condición forma parte'],
+    ['del estado del modelo:'],
+    ['  REGULAR      se matriculó también el semestre inmediato anterior.'],
+    ['  REINICIADO   interrumpió exactamente un semestre y volvió.'],
+    ['  RECUPERADO   interrumpió dos o más semestres y volvió.'],
+    ['La condición no se declara en ningún sitio ni necesita matriz de transición: la determina'],
+    ['el rezago del propio flujo (L=1 regular, L=2 reiniciado, L≥3 recuperado). Por eso el'],
+    ['desglose de las tablas es exacto y suma siempre el total, sin parámetros añadidos.'],
+    ['Es el factor de mayor magnitud del modelo. A igualdad de ciclo y modalidad, los momios de'],
+    ['continuar de un reiniciado son la quinta parte de los de un regular (razón de momios 0,21;'],
+    ['los del recuperado, 0,19). Quien vuelve tras una pausa vuelve frágil, y además avanza'],
+    ['distinto: repite ciclo el 18 % de las veces frente al 9 % de un regular.'],
+    ['El ingresante ocupa esta dimensión sólo durante su primer semestre; a partir del siguiente'],
+    ['pasa a una de las tres condiciones de continuador.'],
+    [],
+    [H('7. Programas nuevos')],
     ['Una carrera sin historia en la base no encuentra evidencia en los niveles finos de la'],
     ['escalera y se queda en el nivel agregado que sí la tiene: el comportamiento de continuación'],
     ['de su ciclo y el reparto de turno de su sede. Es el mismo mecanismo de contracción, sin'],
     ['reglas especiales. Si el plan no dura ' + S.D.planDefecto + ' ciclos, se declara en la columna CiclosPlan.'],
     [],
-    [H('7. Maduración de sede')],
+    [H('8. Maduración de sede')],
     ['Una sede que abre no puede tener estudiantes en cualquier ciclo: despliega su plan de'],
     ['estudios semestre a semestre. En el semestre de apertura sólo existe el ciclo 1, un'],
     ['semestre después el 2, y así sucesivamente. El modelo aplica ese tope al avance de los'],
@@ -348,12 +377,12 @@ function exportarExcel() {
     ['registro es anterior a la ventana de datos y no recibe tope. Las sedes que aparecen por'],
     ['primera vez en el archivo de ingresantes se tratan como aperturas en ese semestre.'],
     [],
-    [H('8. Reparto de los ingresantes por turno')],
+    [H('9. Reparto de los ingresantes por turno')],
     ['El archivo de entrada no declara el turno. Se estima con una composición multinomial'],
     ['contraída por niveles y ponderada por recencia, porque la mezcla de turno está en deriva'],
     ['pronunciada en el histórico. La estimación es determinista y reproducible.'],
     [],
-    [H('9. Escenarios frente a intervalo de predicción')],
+    [H('10. Escenarios frente a intervalo de predicción')],
     ['Los tres ESCENARIOS aplican un desplazamiento sistémico común en escala logit a la tasa'],
     ['de continuación, de ±z·σ. Son estados del mundo coherentes: el total de cada escenario'],
     ['es exactamente la suma de sus celdas, así que sirven para planificar capacidad.'],
@@ -361,13 +390,13 @@ function exportarExcel() {
     ['error de parámetro y varianza propagada). No es aditivo entre celdas, pero es el que'],
     ['responde a la pregunta de dónde caerá el dato observado.'],
     [],
-    [H('10. Validación')],
+    [H('11. Validación')],
     ['Backtesting de origen móvil: se reestima con la información disponible hasta cada semestre'],
     ['de corte y se proyecta el resto, comparando con lo efectivamente observado. Los resultados'],
     ['están en la hoja «Validación». La ponderación de recencia λ se eligió por este mismo'],
     ['procedimiento, no a juicio.'],
     [],
-    [H('11. Advertencias')],
+    [H('12. Advertencias')],
     ['· La proyección es condicional al archivo de ingresantes: no prevé la admisión.'],
     ['· La precisión relativa se degrada al desagregar; en celdas de pocos estudiantes conviene'],
     ['  leer el intervalo de predicción, no sólo el punto.'],
@@ -375,10 +404,10 @@ function exportarExcel() {
     ['  de política de permanencia o de oferta de turnos exige reestimar con datos posteriores.'],
   ];
 
-  const blob = construirXlsx([
+  const blob = await construirXlsx([
     { nombre: 'Resumen', filas: r1, anchos: [26, 14, 14, 13, 13, 13, 13, 13, 14] },
-    { nombre: 'Proyección detallada', filas: r2, anchos: [11, 13, 50, 17, 9, 7, 9, 11, 11, 11, 13, 11, 11], inmovilizar: 1 },
-    { nombre: 'Agregados', filas: r3, anchos: [13, 50, 12, 12, 12] },
+    { nombre: 'Proyección detallada', filas: r2, anchos: [11, 13, 50, 17, 13, 9, 7, 9, 11, 11, 11, 13, 11, 11], inmovilizar: 1 },
+    { nombre: 'Agregados', filas: r3, anchos: [13, 50, 16, 12, 12, 12] },
     { nombre: 'Ingresantes', filas: r4, anchos: [11, 13, 50, 17, 9, 7, 9].concat(S.D.turnos.map(() => 11)).concat(S.D.turnos.map(() => 10)).concat([30]) },
     { nombre: 'Parámetros', filas: r5, anchos: [50, 17, 12, 12, 16, 12, 14] },
     { nombre: 'Validación', filas: r6, anchos: [34, 14, 14, 14, 18, 14] },

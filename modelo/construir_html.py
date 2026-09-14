@@ -9,8 +9,11 @@ RAIZ = os.path.dirname(AQUI)
 SALIDA = os.path.join(RAIZ, "modelo_proyeccion_matricula.html")
 
 
+FUENTE = os.path.join(AQUI, "fuente")
+
+
 def leer(n):
-    return open(os.path.join(AQUI, n), encoding="utf-8").read()
+    return open(os.path.join(FUENTE, n), encoding="utf-8").read()
 
 
 def main():
@@ -24,7 +27,6 @@ def main():
     D["gridLambda"] = G["grid"]
     D["lambdaElegida"] = G["elegida"]
     D["lambdaNuevosElegida"] = G.get("elegidaNuevos", 0.30)
-    D["cobertura"] = json.load(open(os.path.join(AQUI, "cobertura.json"), encoding="utf-8"))
 
     payload = json.dumps(D, ensure_ascii=False, separators=(",", ":"))
     # El JSON se incrusta como literal de objeto; </script> dentro de una cadena

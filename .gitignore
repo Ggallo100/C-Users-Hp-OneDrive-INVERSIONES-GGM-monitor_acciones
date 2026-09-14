@@ -1,7 +1,10 @@
-node_modules/
-__pycache__/
 *.pyc
-modelo/fuente/descargas/
-modelo/fuente/capturas/
-modelo/documento/vista.html
+__pycache__/
+modelo/*_salida.txt
 modelo/documento/*.docx
+modelo/documento/sec_*.png
+modelo/documento/vista.html
+modelo/fuente/capturas/
+modelo/fuente/descargas/
+modelo/hist.pkl
+node_modules/
