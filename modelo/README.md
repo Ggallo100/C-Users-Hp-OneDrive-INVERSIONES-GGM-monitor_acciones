@@ -16,20 +16,34 @@ El estado del modelo es
 | Sede | 0 % | Se conserva. |
 | Modalidad | 0,56 % | Se conserva; condiciona las tres probabilidades. |
 | Carrera | 0,43 % | Se conserva. |
-| Continuidad | siempre | La fija el rezago del flujo; sin parámetros. |
+| Continuidad | siempre | La fijan el rezago y el salto de ciclo del flujo; sin parámetros. |
 | Ciclo | 15,1 % | Matriz de avance estimada. |
 | Turno | 21,5 % | Matriz de transición estimada. |
 
-La **continuidad de la matrícula** distingue al continuador *regular* —se
-matriculó también el semestre anterior— del *reiniciado* —interrumpió uno— y del
-*recuperado* —interrumpió dos o más—; el *ingresante* ocupa la dimensión sólo en
-su primer semestre. No se declara en ningún sitio ni necesita matriz de
-transición: la determina el rezago del propio flujo (L = 1 regular, L = 2
-reiniciado, L ≥ 3 recuperado), de modo que el desglose de las tablas de
-resultados sale de la recursión y suma exactamente el total.
+La **continuidad de la matrícula** distingue tres condiciones de continuador. El
+*regular* se matricula el semestre inmediato y cambia de ciclo. El *recuperado*
+también se matricula el semestre inmediato, pero vuelve al **mismo ciclo**:
+perdió el que cursaba —figura como desertor de ese ciclo— y lo retoma. El
+*reiniciado* interrumpió uno o más semestres y volvió. El *ingresante* ocupa la
+dimensión sólo en su primer semestre. No se declara en ningún sitio ni necesita
+matriz de transición: la determinan el rezago y el salto de ciclo del propio
+flujo (L ≥ 2 reiniciado; L = 1 con Δ = 0 recuperado; L = 1 con Δ ≠ 0 regular), de
+modo que el desglose de las tablas de resultados sale de la recursión y suma
+exactamente el total.
 
-Es el factor de mayor magnitud del modelo: a igualdad de ciclo y modalidad, los
-momios de continuar de un reiniciado son la quinta parte de los de un regular.
+Es el factor de mayor magnitud del modelo, y separa dos riesgos distintos: el
+reiniciado se cae de la matrícula (continúa el 58,2 % frente al 86,0 % de un
+regular, y la brecha no se cierra en todo el plan), mientras que el recuperado se
+queda pero no avanza (continúa el 70,7 %, pero sólo el 57,4 % cambia de ciclo y
+uno de cada cinco repite otra vez), de modo que se acumula en los ciclos bajos.
+
+> **La marca `Desertor` de la base no sirve para esto.** Su regla interna es «no
+> se matriculó el semestre inmediato siguiente» —exacta en los seis semestres
+> cerrados, con cero excepciones— y por construcción excluye a quien sí se
+> matriculó, que es justo el recuperado. Además está congelada a una fecha
+> anterior a la campaña de 2026-II, lo que marca como desertores al 65,5 % de
+> 2026-I y al 0 % de 2026-II. La condición se deriva del panel de matrículas.
+> Ver `descriptivos.py`.
 
 ## Cuándo hace falta regenerar
 
@@ -58,6 +72,7 @@ python3 fase2.py           # 3. varianza, calibración de κ y parametros.json
 python3 cobertura.py       # 4. cobertura de escenarios vs intervalo (para el documento)
 python3 construir_html.py  # 5. ensambla el HTML final
 python3 paridad.py         # 6. referencia para la prueba de paridad del motor JS
+python3 descriptivos.py    # 7. cifras descriptivas para las tablas del documento
 ```
 
 Los pasos 2 a 4 tardan varios minutos cada uno: reestiman el modelo completo en
@@ -71,7 +86,7 @@ que el del total; y se usa minimax en vez de la media porque la media la decide
 el nivel con mayor recorrido relativo, que no es el mismo en todas las
 especificaciones.
 
-Si el λ seleccionado cambia respecto de 0,90 hay que actualizar la constante
+Si el λ seleccionado cambia respecto de 1,00 hay que actualizar la constante
 `LAM` de `fase2.py` y `paridad.py` y volver a ejecutar desde el paso 2. El valor
 por defecto del control del HTML no hace falta tocarlo: la interfaz lo lee de
 `grid_lambda.json`.
@@ -81,7 +96,7 @@ por defecto del control del HTML no hace falta tocarlo: la interfaz lo lee de
 > olvidar deprisa una deriva que no puede ver. Un óptimo cerca del borde
 > **superior** (λ = 1, sin descuento) es lo contrario, y además el modelo más
 > simple. Este modelo recorrió la rejilla de un extremo al otro a medida que se
-> incorporaron la modalidad y la continuidad: 0,30 → 0,40 → 0,90. Ver
+> incorporaron la modalidad y la continuidad: 0,30 → 0,40 → 1,00. Ver
 > `ablacion.py` y los apartados 6.5 a 6.7 del documento.
 
 ## Qué hace cada archivo
@@ -90,13 +105,14 @@ por defecto del control del HTML no hace falta tocarlo: la interfaz lo lee de
 |---|---|
 | `estimar.py` | Implementación de referencia: panel de transiciones, contracción empírico-Bayes, GLM de descomposición de varianza, motor de proyección y backtesting. Es la fuente de verdad contra la que se verifica el motor JavaScript. |
 | `fase2.py` | Calibra el factor de inflación de varianza κ contra la cobertura observada y escribe `parametros.json`. |
-| `compactar.py` | Empaqueta los conteos de transición por periodo en arreglos indexados (~386 KB) que se incrustan en el HTML, incluida la tabla de oferta `(sede, carrera, modalidad)`. |
+| `compactar.py` | Empaqueta los conteos de transición por periodo en arreglos indexados (~450 KB) que se incrustan en el HTML, incluida la tabla de oferta `(sede, carrera, modalidad)`. |
 | `construir_html.py` | Ensambla las piezas de `fuente/` con los datos y escribe el HTML final. |
 | `rejilla.py` | Selección de λ por backtesting de origen móvil, con criterio minimax sobre las series indexadas. Escribe `grid_lambda.json`. |
 | `cobertura.py` | Cobertura empírica de la banda de escenarios frente a la del intervalo de predicción. Alimenta la tabla del capítulo 7 del documento. |
 | `paridad.py` | Reagrega `compacto.json` con la misma aritmética que el motor JavaScript y escribe `paridad_py.json`, la referencia contra la que se verifica. |
 | `ablacion.py` | Contraste de especificación: ejecuta la canalización completa con y sin una dimensión y compara el error en los niveles comunes. Admite `modalidad` o `condicion` como argumento. |
 | `preparar_prueba.py` | Genera los dos archivos de ingresantes de prueba, con y sin columna de modalidad. |
+| `descriptivos.py` | Recalcula las cifras descriptivas que citan los capítulos 1, 4 y 5 del documento (composición por condición, retención y avance de cada una, decaimiento de la cicatriz, permanencia de turno). No forma parte de la estimación: evita tener que rehacerlas a mano al actualizar la base. |
 
 ## Verificación
 

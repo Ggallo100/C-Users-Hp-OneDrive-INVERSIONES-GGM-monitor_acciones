@@ -28,7 +28,7 @@ const D = leer('compacto.json');
 const PAR = leer('parametros.json');
 const PY = leer('paridad_py.json');
 
-const LAM = 0.90, LAM_N = 0.30, FK = 1.0;
+const LAM = 1.00, LAM_N = 0.30, FK = 1.0;
 let peor = 0;
 const abs = (a, b) => Math.abs(a - b);
 const rel = (a, b) => Math.abs(a - b) / Math.max(Math.abs(b), 1);

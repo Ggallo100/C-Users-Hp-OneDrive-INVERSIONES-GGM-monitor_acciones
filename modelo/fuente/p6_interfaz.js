@@ -468,11 +468,14 @@ async function descargarPlantilla() {
     ['Los continuadores no se declaran: los genera el modelo. En los resultados aparecen'],
     ['desglosados en tres grupos según cómo llegan al semestre, y ese desglose sale de la propia'],
     ['recursión, no de ningún dato de entrada:'],
-    ['  Regulares     se matricularon también el semestre inmediato anterior.'],
-    ['  Reiniciados   interrumpieron un semestre y volvieron.'],
-    ['  Recuperados   interrumpieron dos o más semestres y volvieron.'],
-    ['Conviene mirarlos por separado al planificar: un reiniciado repite ciclo el doble que un'],
-    ['regular y tiene mucha menos probabilidad de seguir el semestre siguiente.'],
+    ['  Regulares     se matricularon también el semestre anterior y cambiaron de ciclo.'],
+    ['  Recuperados   se matricularon también el semestre anterior, pero vuelven al MISMO ciclo:'],
+    ['                perdieron el que cursaban y lo retoman.'],
+    ['  Reiniciados   interrumpieron uno o más semestres y volvieron a matricularse.'],
+    ['Conviene mirarlos por separado al planificar, porque el riesgo no es el mismo: el'],
+    ['reiniciado se cae de la matrícula (continúa el 58 % frente al 86 % de un regular) y el'],
+    ['recuperado se queda, pero no avanza (sólo el 57 % cambia de ciclo, y uno de cada cinco'],
+    ['repite otra vez), de modo que se acumula en los ciclos bajos.'],
     [],
     [H('Sedes nuevas y maduración')],
     ['Una sede que abre despliega su plan de estudios semestre a semestre: en el de apertura'],
@@ -684,7 +687,7 @@ function pintarPorCondicion() {
 /**
  * Reparto de una celda-mapa por condición de llegada. El índice 0 es el
  * ingresante y los tres siguientes son los continuadores: regular, reiniciado
- * y recuperado. Como la condición es parte de la clave del estado, el desglose
+ * y recuperado. Como la condición forma parte de la clave del estado, el desglose
  * es exacto y suma siempre el total.
  */
 function porCondicion(mapa) {

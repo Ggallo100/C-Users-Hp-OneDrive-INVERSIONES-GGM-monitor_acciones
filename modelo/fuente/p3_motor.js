@@ -522,10 +522,16 @@ function proyectar(E, stock0, nuevos, periodos, shock, conVar) {
       if (!st) continue;
       const vr = conVar ? (hvar.get(Tori) || new Map()) : null;
       const parO = Tori % 100;
-      /* La condición del estudiante en el semestre de DESTINO la fija el propio
-         rezago del flujo: rezago 1 = regular, 2 = reiniciado, 3 o más =
-         recuperado. No hay parámetro que estimar ni dato que declarar. */
-      const idDest = L === 1 ? 1 : (L === 2 ? 2 : 3);
+      /* La condición del estudiante en el semestre de DESTINO la fijan el
+         rezago del flujo Y el ciclo al que llega: con rezago 1 vuelve sin
+         interrupción, y si además llega AL MISMO CICLO es recuperado —perdió
+         el semestre, figura como desertor de ese ciclo y lo retoma—; si cambia
+         de ciclo es regular. Con rezago 2 o más interrumpió al menos un
+         semestre: reiniciado. No hay parámetro que estimar ni dato que
+         declarar. Como depende del ciclo de destino, se resuelve dentro del
+         bucle de saltos y no aquí fuera. */
+      const idPorCiclo = (c2, ciclo) =>
+        L > 1 ? 2 : (c2 === ciclo ? 3 : 1);
       st.forEach((val, clave) => {
         if (val <= 0) return;
         const pz = clave.split('|');
@@ -546,6 +552,7 @@ function proyectar(E, stock0, nuevos, periodos, shock, conVar) {
           let c2 = ciclo + D.deltas[di];
           if (c2 < 1) c2 = 1;
           if (c2 > tope) c2 = tope;
+          const idDest = idPorCiclo(c2, ciclo);
           for (let ti = 0; ti < NT; ti++) {
             if (tt[ti] <= 0) continue;
             const phi = qq * av[di] * tt[ti];

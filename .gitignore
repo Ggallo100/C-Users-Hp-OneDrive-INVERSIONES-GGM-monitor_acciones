@@ -8,3 +8,5 @@ modelo/fuente/capturas/
 modelo/fuente/descargas/
 modelo/hist.pkl
 node_modules/
+modelo/ablacion_*.txt
+modelo/descriptivos.txt

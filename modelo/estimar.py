@@ -81,25 +81,46 @@ CONDICIONES = ["Ingresante", "Regular", "Reiniciado", "Recuperado"]
 def condicion_de(b, g):
     """
     Condición de llegada de cada matrícula, según la brecha con la matrícula
-    anterior del mismo estudiante:
+    anterior del mismo estudiante y el ciclo al que llega:
 
         Ingresante  primera matrícula (campo Nuevos de la base)
-        Regular     se matriculó también el semestre inmediato anterior
-        Reiniciado  interrumpió exactamente un semestre y volvió
-        Recuperado  interrumpió dos o más semestres y volvió
+        Recuperado  se matriculó también el semestre inmediato anterior y
+                    vuelve AL MISMO CICLO: abandonó el semestre en curso, por
+                    lo que figura como desertor de ese ciclo, y lo retoma en el
+                    siguiente
+        Regular     se matriculó el semestre inmediato anterior y cambia de
+                    ciclo: continúa sin interrupción
+        Reiniciado  interrumpe uno o más semestres y vuelve
+
+    El recuperado es el caso más específico de la matrícula consecutiva y por
+    eso se evalúa antes que el regular; el reiniciado es todo lo que llega tras
+    una brecha. Las cuatro condiciones parten la matrícula sin solaparse, de
+    modo que el desglose suma siempre el total.
+
+    La marca `Desertor` de la base NO sirve para identificar al recuperado. Su
+    regla interna es «no se matriculó el semestre inmediato siguiente», que por
+    construcción excluye al que sí se matriculó: en los seis semestres cerrados
+    no hay ni un solo caso de Desertor='Si' con matrícula en T+1. Además está
+    congelada a una fecha anterior a la campaña de 2026-II, lo que marca como
+    desertores al 65,5 % de 2026-I y al 0 % de 2026-II. La condición se deriva
+    del propio panel de matrículas, que es lo observable y lo que el modelo
+    proyecta.
 
     Los registros sin matrícula previa dentro de la ventana y no marcados como
     ingresantes están censurados por la izquierda: el estudiante ya estaba
     matriculado antes de que empiece la base. Se les asigna «Regular», que es
-    la categoría a la que más se parecen (82,8 % de continuación frente al
-    85,2 % de los regulares). Son el 62,9 % de 2023-I y menos del 0,2 % de
-    2026-II, y la ponderación de recencia les da un peso mínimo.
+    la categoría a la que más se parecen. Son el 62,9 % de 2023-I y menos del
+    0,2 % de 2026-II, y la ponderación de recencia les da un peso mínimo.
     """
-    brecha = b["t"] - g["t"].shift(1)
-    cond = np.where(b["esNuevo"].values == 1, "Ingresante",
-                    np.where(brecha.values == 2, "Reiniciado",
-                             np.where(brecha.values >= 3, "Recuperado", "Regular")))
-    return cond
+    brecha = (b["t"] - g["t"].shift(1)).values
+    mismo = (b["Ciclo"] - g["Ciclo"].shift(1)).values == 0
+    # Sin matrícula previa observable la brecha es NaN y toda comparación con
+    # ella da False, así que la censura se resuelve explícitamente como regular.
+    interrumpe = brecha >= 2
+    return np.where(
+        b["esNuevo"].values == 1, "Ingresante",
+        np.where(interrumpe, "Reiniciado",
+                 np.where((brecha == 1) & mismo, "Recuperado", "Regular")))
 
 
 def clasifica_delta(d):
@@ -689,9 +710,10 @@ class Modelo:
         shock   : desplazamiento sistémico en escala logit sobre q_L.
         varianza: si True devuelve también la varianza INDEPENDIENTE por celda.
 
-        La condición de llegada al semestre de destino la determina el propio
-        rezago del flujo, sin ningún parámetro añadido: quien llega con rezago 1
-        es regular, con rezago 2 reiniciado y con rezago 3 o más recuperado. Los
+        La condición de llegada al semestre de destino la determinan el rezago y
+        el salto de ciclo del propio flujo, sin ningún parámetro añadido: quien
+        llega con rezago 1 es regular; quien llega con rezago 2 al mismo ciclo
+        del que salió es recuperado; cualquier otro regreso es reiniciado. Los
         ingresantes del archivo entran con la condición «Ingresante», que ocupan
         sólo en su primer semestre.
         """
@@ -709,8 +731,10 @@ class Modelo:
                     continue
                 vr = hvar.get(Tori, {})
                 parO = Tori % 100
-                cond_dest = self.condiciones[1] if L == 1 else (
-                    self.condiciones[2] if L == 2 else self.condiciones[3])
+                # La condición de destino la fijan el rezago Y el ciclo: sólo es
+                # «recuperado» quien vuelve tras un semestre AL MISMO ciclo, de
+                # modo que se resuelve dentro del bucle de saltos de ciclo.
+                cond_reg, cond_rei, cond_rec = self.condiciones[1:4]
                 for (sede, carrera, moda, cond, ciclo, turno), val in st.items():
                     if val <= 0:
                         continue
@@ -729,6 +753,8 @@ class Modelo:
                         if av[di] <= 0:
                             continue
                         c2 = min(max(ciclo + d, 1), tope)
+                        cond_dest = cond_rei if L > 1 else (
+                            cond_rec if c2 == ciclo else cond_reg)
                         for ti, t2 in enumerate(self.turnos):
                             if tt[ti] <= 0:
                                 continue

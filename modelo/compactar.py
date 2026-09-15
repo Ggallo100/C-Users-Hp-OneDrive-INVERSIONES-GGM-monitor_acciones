@@ -13,12 +13,13 @@ que la sede y la carrera, así que no necesita matriz de transición propia; per
 sí entra en todas las tablas de conteo porque condiciona con fuerza la
 continuación, el avance de ciclo y el turno.
 
-La condición de llegada —regular, reiniciado o recuperado, según si el
-estudiante viene de matricularse el semestre anterior, de una pausa de un
-semestre o de una pausa mayor— no se declara en ningún sitio: la determina el
-rezago del propio flujo. Por eso tampoco necesita matriz de transición, y por
-eso el desglose de continuadores que piden las tablas de resultados sale de la
-recursión sin parámetros añadidos.
+La condición de llegada —recuperado si el estudiante se matricula el semestre
+inmediato pero vuelve al MISMO ciclo, porque perdió el que cursaba y lo retoma;
+regular si se matricula el semestre inmediato cambiando de ciclo; reiniciado si
+interrumpió uno o más semestres— no se declara en ningún sitio: la determinan el
+rezago y el salto de ciclo del propio flujo. Por eso tampoco
+necesita matriz de transición, y por eso el desglose de continuadores que piden
+las tablas de resultados sale de la recursión sin parámetros añadidos.
 """
 import json
 import numpy as np

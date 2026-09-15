@@ -6,7 +6,7 @@ from estimar import Modelo, k_betabinom, k_dirichlet, LAG_MAX, siguiente
 AQUI = os.path.dirname(os.path.abspath(__file__))
 
 D = json.load(open(os.path.join(AQUI, 'compacto.json'), encoding='utf-8'))
-LAM, LAMN, FK = 0.90, 0.30, 1.0   # los mismos hiperparametros que usa el HTML
+LAM, LAMN, FK = 1.00, 0.30, 1.0   # los mismos hiperparametros que usa el HTML
 tmax=len(D['periodos'])-1
 NT=len(D['turnos']); ND=len(D['deltas']); NM=len(D['modalidades'])
 NC=len(D['condiciones'])

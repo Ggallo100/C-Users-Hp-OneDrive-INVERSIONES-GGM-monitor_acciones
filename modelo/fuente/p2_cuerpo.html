@@ -59,7 +59,7 @@
   <div class="avz" id="avanzado">
     <div class="campo">
       <label for="lam">λ recencia (continuación)</label>
-      <input type="number" id="lam" min="0.05" max="1" step="0.05" value="0.90">
+      <input type="number" id="lam" min="0.05" max="1" step="0.05" value="1.00">
       <div class="pista">1 = todo el histórico pesa igual</div>
     </div>
     <div class="campo">
@@ -132,8 +132,9 @@
     <header><h2>Continuadores por continuidad de la matrícula</h2></header>
     <div class="nota">
       Serie observada y proyectada, escenario moderado. El regular se matriculó
-      también el semestre anterior; el reiniciado interrumpió un semestre y
-      volvió; el recuperado interrumpió dos o más. El desglose no es una
+      también el semestre anterior y cambió de ciclo; el recuperado también se
+      matriculó, pero vuelve al mismo ciclo porque perdió el que cursaba; el
+      reiniciado interrumpió uno o más semestres. El desglose no es una
       etiqueta añadida al resultado: la condición forma parte del estado del
       modelo, de modo que cada barra es exactamente la suma de sus celdas.
     </div>
@@ -279,18 +280,21 @@
     <header><h2>Continuidad de la matrícula</h2><span class="mini">dimensión del estado</span></header>
     <p class="txt">
       La condición de llegada es el factor de mayor magnitud del modelo, por
-      delante de la modalidad. A igualdad de ciclo y modalidad, los momios de
-      continuar de un reiniciado son la quinta parte de los de un regular
-      (razón de momios 0,21; los del recuperado, 0,19). Quien vuelve tras una
-      pausa vuelve frágil.
+      delante de la modalidad, y separa dos riesgos distintos. El reiniciado
+      —el que interrumpió— es un problema de retención: continúa el 58 % de
+      las veces frente al 86 % de un regular, y la brecha no se cierra en todo
+      el plan. El recuperado —el que sigue matriculado pero repite ciclo— pierde
+      mucha menos matrícula (71 %): lo que pierde es tiempo, porque sólo el 57 %
+      avanza de ciclo y uno de cada cinco vuelve a repetir.
     </p>
     <div class="leyenda" id="legContCond"></div>
     <div class="lienzo" id="grContCond"></div>
     <p class="txt" style="margin-top:10px">
       La condición no se declara en ningún sitio ni necesita matriz de
-      transición: la determina el rezago del propio flujo. Quien se rematricula
-      al semestre siguiente llega como regular; quien lo hace tras saltarse uno,
-      como reiniciado; tras saltarse dos o más, como recuperado. Por eso el
+      transición: la determinan el rezago y el salto de ciclo del propio flujo.
+      Quien se rematricula al semestre siguiente llega como recuperado si vuelve
+      al mismo ciclo y como regular si cambia de ciclo; quien vuelve tras
+      saltarse uno o más semestres, como reiniciado. Por eso el
       desglose de las tablas sale de la recursión sin ningún parámetro añadido.
     </p>
     <div class="envoltura"><table id="tbCondicion"></table></div>

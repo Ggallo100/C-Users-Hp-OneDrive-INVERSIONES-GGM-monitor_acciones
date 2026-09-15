@@ -28,7 +28,7 @@ from estimar import (cargar, panel, stock_observado, nuevos_observados,
                      construir_parametros, varianza_proceso, Modelo,
                      agrega, epap, NIVELES, siguiente)
 
-LAM, LAM_N = 0.90, 0.30
+LAM, LAM_N = 1.00, 0.30
 NIVEL_CONF = 0.80
 
 

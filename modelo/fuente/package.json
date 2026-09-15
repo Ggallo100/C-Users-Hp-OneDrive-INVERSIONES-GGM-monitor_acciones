@@ -1,0 +1,15 @@
+{
+  "name": "pruebas-modelo-matricula",
+  "private": true,
+  "description": "Pruebas del motor y capturas del modelo de proyección de matrícula",
+  "scripts": {
+    "paridad": "node prueba_motor.js",
+    "html": "node probar_html.js",
+    "ciclo": "node probar_ciclo.js",
+    "casos": "node verificar_casos.js",
+    "capturas": "node capturar.js"
+  },
+  "dependencies": {
+    "playwright": "^1.63.0"
+  }
+}
