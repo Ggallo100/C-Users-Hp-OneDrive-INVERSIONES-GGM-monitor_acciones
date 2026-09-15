@@ -330,6 +330,13 @@ function estimar(D, lam, lamN, factorK) {
   }
   const celdasNiv = Array.from(ncNivCmPar.values());
   const kNivelCiclo = kBetaBinom(celdasNiv.map(a => a[1]), celdasNiv.map(a => a[0])) * factorK;
+
+  /* ---- r = P(Recuperado | rezago 1) ----
+     Viene ya agregada de la base central, que es la única que trae el campo
+     `Condicion`: lo que separa a un regular de un recuperado no es el salto de
+     ciclo sino no haber cerrado el semestre anterior. No se recalcula con λ
+     porque su fuente es otra base, con otra ventana. */
+  const REC = D.rec || null;
   const kFormaCiclo = kDirichlet(Array.from(ncFormaCelda.values())) * factorK;
 
   return {
@@ -339,6 +346,7 @@ function estimar(D, lam, lamN, factorK) {
     tuCelda, tuCond, tuModa, tuSede, kTurno,
     ntCelda, ntCarModaPar, ntCarModa, ntSedeModaPar, ntSedeModa, ntSede, ntGlobal, kNuevos,
     nmCelda, nmCarPar, nmCar, nmSedePar, nmSede, nmGlobal, kModalidad,
+    REC,
     NCI, ncNivCelda, ncNivCmPar, ncNivCarPar, ncNivModaPar, ncNivPar,
     ncGlobTot, ncGlobAlto, kNivelCiclo,
     ncFormaCelda, ncFormaCm, ncFormaCar, ncFormaModa, ncFormaGlobal, kFormaCiclo,
@@ -517,6 +525,28 @@ function mezclaNuevos(E, is, ic, im, ciclo, par) {
  * o el de maduración de la sede— acumulando en el tope lo que caiga por encima,
  * que es lo mismo que hace la matriz de avance con un estudiante retenido.
  */
+/*
+ * Fracción del flujo de rezago 1 que llega como RECUPERADO: el estudiante que
+ * abandonó, se retiró o quedó inhabilitado el semestre anterior y aun así se
+ * matricula. Contracción Beta-Binomial en cascada
+ * global → ciclo → condición×ciclo → modalidad×condición×ciclo → carrera.
+ */
+function tasaRecuperado(E, ic, im, id, ciclo) {
+  const R = E.REC;
+  if (!R) return 0;
+  const D = E.D, cl = String(Math.min(ciclo, D.cicloMax));
+  const cond = String(id), moda = D.modalidades[im], carr = D.carreras[ic];
+  const k = R.k_rec * E.factorK;
+  let est = R.global.n > 0 ? R.global.k / R.global.n : 0;
+  for (const celda of [R.ciclo[cl], R.cond_ciclo[cond + '|' + cl],
+                       R.moda_cond_ciclo[moda + '|' + cond + '|' + cl],
+                       R.celda[carr + '|' + moda + '|' + cond + '|' + cl]]) {
+    if (!celda || celda.n <= 0) continue;
+    est = (celda.k + k * est) / (celda.n + k);
+  }
+  return Math.min(Math.max(est, 0), 1);
+}
+
 function mezclaCiclo(E, is, ic, im, par, tope) {
   const ck = is + ',' + ic + ',' + im + ',' + par + ',' + (tope || 0);
   const hit = E.cacheNc.get(ck); if (hit) return hit;
@@ -616,16 +646,11 @@ function proyectar(E, stock0, nuevos, periodos, shock, conVar) {
       if (!st) continue;
       const vr = conVar ? (hvar.get(Tori) || new Map()) : null;
       const parO = Tori % 100;
-      /* La condición del estudiante en el semestre de DESTINO la fijan el
-         rezago del flujo Y el ciclo al que llega: con rezago 1 vuelve sin
-         interrupción, y si además llega AL MISMO CICLO es recuperado —perdió
-         el semestre, figura como desertor de ese ciclo y lo retoma—; si cambia
-         de ciclo es regular. Con rezago 2 o más interrumpió al menos un
-         semestre: reiniciado. No hay parámetro que estimar ni dato que
-         declarar. Como depende del ciclo de destino, se resuelve dentro del
-         bucle de saltos y no aquí fuera. */
-      const idPorCiclo = (c2, ciclo) =>
-        L > 1 ? 2 : (c2 === ciclo ? 3 : 1);
+      /* La condición del estudiante en el semestre de DESTINO la fija el
+         rezago, y dentro del rezago 1 la fracción r que no cerró el semestre
+         anterior. NO depende del salto de ciclo: el recuperado repite mucho
+         —un 37,8 % de las veces— pero repetir no es su definición. */
+      const iREG = 1, iREC = 2, iREI = 3;
       st.forEach((val, clave) => {
         if (val <= 0) return;
         const pz = clave.split('|');
@@ -641,22 +666,30 @@ function proyectar(E, stock0, nuevos, periodos, shock, conVar) {
         const [tt, nt] = turnoDe(E, is, im, id, ciclo, it);
         const tope = Math.min(planPorIc[ic] || D.planDefecto, topeMaduracion[is]);
         const vx = conVar ? (vr.get(clave) || 0) : 0;
+        // Reparto del flujo entre las condiciones de destino.
+        const reparto = L > 1 ? [[iREI, 1]] : (() => {
+          const rr = tasaRecuperado(E, ic, im, id, ciclo);
+          return [[iREG, 1 - rr], [iREC, rr]];
+        })();
         for (let di = 0; di < ND; di++) {
           if (av[di] <= 0) continue;
           let c2 = ciclo + D.deltas[di];
           if (c2 < 1) c2 = 1;
           if (c2 > tope) c2 = tope;
-          const idDest = idPorCiclo(c2, ciclo);
           for (let ti = 0; ti < NT; ti++) {
             if (tt[ti] <= 0) continue;
             const phi = qq * av[di] * tt[ti];
-            const k2 = is + '|' + ic + '|' + im + '|' + idDest + '|' + c2 + '|' + ti;
-            dest.set(k2, (dest.get(k2) || 0) + val * phi);
-            if (conVar) {
-              const vReal = val * phi * (1 - phi);
-              const vPar = val * val * phi * phi * (
-                (1 - qq) / (qq * nq) + (1 - av[di]) / (av[di] * na) + (1 - tt[ti]) / (tt[ti] * nt));
-              dvar.set(k2, (dvar.get(k2) || 0) + vReal + vPar + vx * phi * phi);
+            for (const [idDest, frac] of reparto) {
+              if (frac <= 0) continue;
+              const k2 = is + '|' + ic + '|' + im + '|' + idDest + '|' + c2 + '|' + ti;
+              dest.set(k2, (dest.get(k2) || 0) + val * phi * frac);
+              if (conVar) {
+                const ph = phi * frac;
+                const vReal = val * ph * (1 - ph);
+                const vPar = val * val * ph * ph * (
+                  (1 - qq) / (qq * nq) + (1 - av[di]) / (av[di] * na) + (1 - tt[ti]) / (tt[ti] * nt));
+                dvar.set(k2, (dvar.get(k2) || 0) + vReal + vPar + vx * ph * ph);
+              }
             }
           }
         }

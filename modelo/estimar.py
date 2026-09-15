@@ -75,52 +75,33 @@ def panel(df):
     return b, per, idx
 
 
-CONDICIONES = ["Ingresante", "Regular", "Reiniciado", "Recuperado"]
+CONDICIONES = ["Ingresante", "Regular", "Recuperado", "Reinicio",
+               "Ingresante nueva admisión"]
 
 
 def condicion_de(b, g):
     """
-    Condición de llegada de cada matrícula, según la brecha con la matrícula
-    anterior del mismo estudiante y el ciclo al que llega:
+    Condición de llegada DERIVABLE del histórico de matriculados.
+
+    El histórico no trae el campo `Condicion` —el estado con que el estudiante
+    cerró el semestre anterior— y sin él no se puede separar al regular del
+    recuperado, que es justamente lo que los distingue en la base central. Lo
+    que sí determina es:
 
         Ingresante  primera matrícula (campo Nuevos de la base)
-        Recuperado  se matriculó también el semestre inmediato anterior y
-                    vuelve AL MISMO CICLO: abandonó el semestre en curso, por
-                    lo que figura como desertor de ese ciclo, y lo retoma en el
-                    siguiente
-        Regular     se matriculó el semestre inmediato anterior y cambia de
-                    ciclo: continúa sin interrupción
-        Reiniciado  interrumpe uno o más semestres y vuelve
+        Reinicio    vuelve tras interrumpir uno o más semestres
+        Regular     se matriculó también el semestre inmediato anterior
 
-    El recuperado es el caso más específico de la matrícula consecutiva y por
-    eso se evalúa antes que el regular; el reiniciado es todo lo que llega tras
-    una brecha. Las cuatro condiciones parten la matrícula sin solaparse, de
-    modo que el desglose suma siempre el total.
-
-    La marca `Desertor` de la base NO sirve para identificar al recuperado. Su
-    regla interna es «no se matriculó el semestre inmediato siguiente», que por
-    construcción excluye al que sí se matriculó: en los seis semestres cerrados
-    no hay ni un solo caso de Desertor='Si' con matrícula en T+1. Además está
-    congelada a una fecha anterior a la campaña de 2026-II, lo que marca como
-    desertores al 65,5 % de 2026-I y al 0 % de 2026-II. La condición se deriva
-    del propio panel de matrículas, que es lo observable y lo que el modelo
-    proyecta.
-
-    Los registros sin matrícula previa dentro de la ventana y no marcados como
-    ingresantes están censurados por la izquierda: el estudiante ya estaba
-    matriculado antes de que empiece la base. Se les asigna «Regular», que es
-    la categoría a la que más se parecen. Son el 62,9 % de 2023-I y menos del
-    0,2 % de 2026-II, y la ponderación de recencia les da un peso mínimo.
+    El 99,2 % de esas matrículas consecutivas son efectivamente regulares, de
+    modo que la aproximación sólo afecta a la dimensión de turno, que es para
+    lo único que se usa este panel. El reparto entre regular y recuperado, y
+    el comportamiento propio de cada uno, salen de la base central a través de
+    `central.py`; ver el apartado 6.12 del documento.
     """
     brecha = (b["t"] - g["t"].shift(1)).values
-    mismo = (b["Ciclo"] - g["Ciclo"].shift(1)).values == 0
-    # Sin matrícula previa observable la brecha es NaN y toda comparación con
-    # ella da False, así que la censura se resuelve explícitamente como regular.
     interrumpe = brecha >= 2
-    return np.where(
-        b["esNuevo"].values == 1, "Ingresante",
-        np.where(interrumpe, "Reiniciado",
-                 np.where((brecha == 1) & mismo, "Recuperado", "Regular")))
+    return np.where(b["esNuevo"].values == 1, "Ingresante",
+                    np.where(interrumpe, "Reinicio", "Regular"))
 
 
 def clasifica_delta(d):
@@ -247,6 +228,54 @@ def tabla_nuevos_modalidad(b, modalidades, nper, lam_n):
             .reindex(columns=modalidades, fill_value=0.0))
 
 
+def tabla_recuperado(bc, lam):
+    """
+    Conteos para r = P(llega como Recuperado | llega con rezago 1), sobre el
+    panel de la BASE CENTRAL, que es la única que trae el campo `Condicion`.
+
+    El recuperado no lo define el salto de ciclo sino no haber cerrado el
+    semestre anterior: abandono, retiro o inhabilitación, seguidos de
+    matrícula inmediata. Es una población pequeña —un 0,84 % del flujo de
+    rezago 1— pero muy distinta: continúa el 63,8 % frente al 85,5 % de un
+    regular, repite ciclo el 37,8 % frente al 9,2 %, y sobre todo reincide:
+    quien llega como recuperado vuelve a serlo el 21,2 % de las veces, frente
+    al 0,6 % de un regular. Por eso la condición de origen entra en la
+    cascada junto al ciclo.
+    """
+    f = bc[bc["rezago"] == 1].copy()
+    if not len(f):
+        return {}
+    f["w"] = np.power(float(lam), f["t"].max() - f["t"].values)
+    f["rec"] = (f["condSig"] == "Recuperado").astype(float)
+    # Se condiciona en el estado de ORIGEN, que es lo que la recursión conoce
+    # cuando tiene que repartir el flujo.
+    f["cl"] = f["Ciclo"].astype(int).clip(upper=int(bc["Ciclo"].max())).astype(str)
+    # La condición se indexa por POSICIÓN en CONDICIONES, no por nombre: así la
+    # tabla sirve igual al motor JavaScript y a la prueba de paridad, que
+    # trabajan con índices.
+    f["ci"] = f["condicion"].map({c: str(i) for i, c in enumerate(CONDICIONES)})
+    niveles = {
+        "ciclo": ["cl"],
+        "cond_ciclo": ["ci", "cl"],
+        "moda_cond_ciclo": ["Modalidad_estudios", "ci", "cl"],
+        "celda": ["Carrera", "Modalidad_estudios", "ci", "cl"],
+    }
+    out = {}
+    for nom, cols in niveles.items():
+        g = f.groupby(cols).apply(
+            lambda d: pd.Series({"n": d["w"].sum(), "k": (d["w"] * d["rec"]).sum()}),
+            include_groups=False)
+        out[nom] = {"|".join(str(x) for x in (i if isinstance(i, tuple) else (i,))):
+                    {"n": round(float(r["n"]), 4), "k": round(float(r["k"]), 4)}
+                    for i, r in g.iterrows() if r["n"] > 0}
+    out["global"] = {"n": round(float(f["w"].sum()), 4),
+                     "k": round(float((f["w"] * f["rec"]).sum()), 4)}
+    out["k_rec"] = float(k_betabinom(
+        [v["k"] for v in out["cond_ciclo"].values()],
+        [v["n"] for v in out["cond_ciclo"].values()]))
+    return out
+
+
 def tabla_nuevos_ciclo(b, nper, lam_n):
     """
     Reparto de los ingresantes por CICLO de ingreso. Sólo se usa cuando el
@@ -360,6 +389,17 @@ def varianza_proceso(b, nper):
 # =============================================================================
 # Construcción del paquete de parámetros
 # =============================================================================
+_CACHE_CENTRAL = {}
+
+
+def _panel_central():
+    """Panel de la base central, cacheado: la estimación lo recorre varias veces."""
+    if "b" not in _CACHE_CENTRAL:
+        import central
+        _CACHE_CENTRAL["b"] = central.panel_estimacion()
+    return _CACHE_CENTRAL["b"]
+
+
 def construir_parametros(b, per, hasta=None, lam=0.50, lam_n=0.30):
     if hasta is None:
         hasta = per[-1]
@@ -575,6 +615,9 @@ def construir_parametros(b, per, hasta=None, lam=0.50, lam_n=0.30):
         "k_celda": ks["celda"], "k_carrera": ks["carrera"], "k_moda": ks["moda"],
         "k_cond": ks["cond"], "k_ciclopar": ks["ciclopar"], "k_ciclo": ks["ciclo"],
         "condiciones": CONDICIONES,
+        # r = P(Recuperado | rezago 1). Sale de la base central, la única que
+        # trae el campo `Condicion`; ver `central.py` y el apartado 6.12.
+        "recuperado": tabla_recuperado(_panel_central(), lam),
         "av_celda": av_celda, "av_moda": av_moda, "av_cond": av_cond,
         "av_ciclo": av_ciclo,
         "av_global": R4(av.sum().values),
@@ -794,6 +837,29 @@ class Modelo:
             ("celda", p["nm_celda"].get(f"{sede}|{carrera}|{cl}|{parid}")),
         ], p["nm_global"], k)
 
+    def tasa_recuperado(self, carrera, moda, cond, ciclo):
+        """
+        Fracción del flujo de rezago 1 que llega como RECUPERADO, es decir que
+        no cerró el semestre anterior. Contracción Beta-Binomial en cascada
+        global → ciclo → condición×ciclo → modalidad×condición×ciclo → carrera.
+        """
+        R = self.p.get("recuperado")
+        if not R:
+            return 0.0
+        cl = str(min(int(ciclo), self.p["cicloMax"]))
+        ci = str(self.condiciones.index(cond)) if cond in self.condiciones else str(cond)
+        k = R["k_rec"] * self.fk
+        g = R["global"]
+        est = g["k"] / max(g["n"], 1e-9)
+        for celda in (R["ciclo"].get(cl),
+                      R["cond_ciclo"].get(f"{ci}|{cl}"),
+                      R["moda_cond_ciclo"].get(f"{moda}|{ci}|{cl}"),
+                      R["celda"].get(f"{carrera}|{moda}|{ci}|{cl}")):
+            if celda is None or celda["n"] <= 0:
+                continue
+            est = (celda["k"] + k * est) / (celda["n"] + k)
+        return min(max(est, 0.0), 1.0)
+
     def mezcla_ciclo(self, sede, carrera, moda, parid, tope=None):
         """
         Reparto estimado de los ingresantes por ciclo de ingreso, para cuando
@@ -902,10 +968,11 @@ class Modelo:
                     continue
                 vr = hvar.get(Tori, {})
                 parO = Tori % 100
-                # La condición de destino la fijan el rezago Y el ciclo: sólo es
-                # «recuperado» quien vuelve tras un semestre AL MISMO ciclo, de
-                # modo que se resuelve dentro del bucle de saltos de ciclo.
-                cond_reg, cond_rei, cond_rec = self.condiciones[1:4]
+                # La condición de destino la fija el rezago, y dentro del
+                # rezago 1 la fracción r que no cerró el semestre anterior.
+                # No depende del salto de ciclo: el recuperado repite mucho
+                # —un 37,8 % de las veces— pero repetir no es su definición.
+                cond_reg, cond_rec, cond_rei = self.condiciones[1:4]
                 for (sede, carrera, moda, cond, ciclo, turno), val in st.items():
                     if val <= 0:
                         continue
@@ -920,25 +987,33 @@ class Modelo:
                     tope = min(p["planCiclos"].get(carrera, p["planDefecto"]),
                                self.tope_sede(sede, T))
                     vx = vr.get((sede, carrera, moda, cond, ciclo, turno), 0.0)
+                    # Reparto del flujo entre las condiciones de destino.
+                    if L > 1:
+                        reparto = [(cond_rei, 1.0)]
+                    else:
+                        rr = self.tasa_recuperado(carrera, moda, cond, ciclo)
+                        reparto = [(cond_reg, 1.0 - rr), (cond_rec, rr)]
                     for di, d in enumerate(DELTAS):
                         if av[di] <= 0:
                             continue
                         c2 = min(max(ciclo + d, 1), tope)
-                        cond_dest = cond_rei if L > 1 else (
-                            cond_rec if c2 == ciclo else cond_reg)
                         for ti, t2 in enumerate(self.turnos):
                             if tt[ti] <= 0:
                                 continue
                             phi = qq * av[di] * tt[ti]
-                            key = (sede, carrera, moda, cond_dest, c2, t2)
-                            dest[key] = dest.get(key, 0.0) + val * phi
-                            if varianza:
-                                v_real = val * phi * (1 - phi)
-                                v_par = (val ** 2) * (phi ** 2) * (
-                                    (1 - qq) / (qq * nq)
-                                    + (1 - av[di]) / (av[di] * na)
-                                    + (1 - tt[ti]) / (tt[ti] * nt))
-                                dvar[key] = dvar.get(key, 0.0) + v_real + v_par + vx * phi ** 2
+                            for cond_dest, frac in reparto:
+                                if frac <= 0:
+                                    continue
+                                key = (sede, carrera, moda, cond_dest, c2, t2)
+                                dest[key] = dest.get(key, 0.0) + val * phi * frac
+                                if varianza:
+                                    ph = phi * frac
+                                    v_real = val * ph * (1 - ph)
+                                    v_par = (val ** 2) * (ph ** 2) * (
+                                        (1 - qq) / (qq * nq)
+                                        + (1 - av[di]) / (av[di] * na)
+                                        + (1 - tt[ti]) / (tt[ti] * nt))
+                                    dvar[key] = dvar.get(key, 0.0) + v_real + v_par + vx * ph ** 2
             for (sede, carrera, moda, ciclo), cant in nuevos.get(T, {}).items():
                 if cant <= 0:
                     continue

@@ -111,7 +111,26 @@ def panel(df):
     b["condicion"] = condicion_de(b)
     b["esNuevo"] = b["condicion"].isin(
         ["Ingresante", "Ingresante nueva admisión"]).astype(int)
+    b["condSig"] = b.groupby("cod", sort=False)["condicion"].shift(-1)
     return b
+
+
+def panel_estimacion(df=None):
+    """
+    Panel listo para estimar: sin el semestre parcial y sin 2023-I.
+
+    2026-II sólo trae 708 filas, de modo que dejarlo dentro censuraría todos
+    los orígenes de 2026-I —parecería que nadie continuó— y hundiría las tasas.
+    Se elimina ANTES de calcular el futuro de cada estudiante, no después.
+    """
+    b = panel(cargar() if df is None else df)
+    b = b[b["Periodo_real"] != 202602].sort_values(["cod", "t"]).copy()
+    g = b.groupby("cod", sort=False)
+    b["tSig"] = g["t"].shift(-1)
+    b["cicloSig"] = g["Ciclo"].shift(-1)
+    b["condSig"] = g["condicion"].shift(-1)
+    b["rezago"] = b["tSig"] - b["t"]
+    return b[b["Periodo_real"] != 202301]
 
 
 def condicion_de(b):

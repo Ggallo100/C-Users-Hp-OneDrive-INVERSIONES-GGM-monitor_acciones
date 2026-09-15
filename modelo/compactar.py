@@ -26,7 +26,7 @@ import numpy as np
 import pandas as pd
 from estimar import (cargar, panel, clasifica_delta, LAG_MAX, DELTAS,
                      varianza_proceso, stock_observado, nuevos_observados,
-                     CONDICIONES)
+                     CONDICIONES, tabla_recuperado, _panel_central)
 
 
 def compactar():
@@ -151,6 +151,9 @@ def compactar():
     return {
         "sedes": sedes, "carreras": carreras, "modalidades": modalidades,
         "condiciones": CONDICIONES,
+        # r = P(Recuperado | rezago 1), desde la base central: es la única que
+        # trae el campo `Condicion`, que es lo que separa regular de recuperado.
+        "rec": tabla_recuperado(_panel_central(), 1.0),
         "turnos": turnos, "periodos": [int(p) for p in per],
         "deltas": DELTAS, "lagMax": LAG_MAX,
         "cicloMax": int(b["Ciclo"].max()),

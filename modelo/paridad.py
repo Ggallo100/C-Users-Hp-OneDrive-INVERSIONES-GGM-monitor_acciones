@@ -86,6 +86,9 @@ par={'periodos':D['periodos'],'turnos':list(range(NT)),'sedes':D['sedes'],
  'k_cond':ks['cond'],'k_ciclopar':ks['ciclopar'],'k_ciclo':ks['ciclo'],
  # el arnés indexa las condiciones igual que compacto.json, por posición
  'condiciones':[str(i) for i in range(NC)],
+ # r = P(Recuperado | rezago 1) tal cual viene del payload: el motor JS lee la
+ # misma tabla, así que la paridad comprueba también esta cascada.
+ 'recuperado':D.get('rec'),
  'av_celda':avc,'av_moda':avm,'av_cond':avd,'av_ciclo':avci,'av_global':avg,
  'k_avance':k_dirichlet(np.array(list(avc.values())))*FK,
  'tu_celda':tuc,'tu_cond':tud,'tu_moda':tum,'tu_sede':tus,
