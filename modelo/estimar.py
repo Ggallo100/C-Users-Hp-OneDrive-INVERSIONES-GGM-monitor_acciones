@@ -25,7 +25,7 @@ import numpy as np
 import pandas as pd
 
 RUTA = ("/root/.claude/uploads/44616b33-dba5-571e-87f8-59fe5748354c/"
-        "a85cb9c2-historico_matriculados_con_fecha_de_matricula.xlsx")
+        "132174d5-historico_matriculados_con_fecha_de_matricula.xlsx")
 LAG_MAX = 4
 DELTAS = [-1, 0, 1, 2, 3]
 

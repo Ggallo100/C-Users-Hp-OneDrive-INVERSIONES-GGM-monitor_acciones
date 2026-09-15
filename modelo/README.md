@@ -32,9 +32,9 @@ modo que el desglose de las tablas de resultados sale de la recursión y suma
 exactamente el total.
 
 Es el factor de mayor magnitud del modelo, y separa dos riesgos distintos: el
-reiniciado se cae de la matrícula (continúa el 58,2 % frente al 86,0 % de un
+reiniciado se cae de la matrícula (continúa el 59,0 % frente al 86,0 % de un
 regular, y la brecha no se cierra en todo el plan), mientras que el recuperado se
-queda pero no avanza (continúa el 70,7 %, pero sólo el 57,4 % cambia de ciclo y
+queda pero no avanza (continúa el 70,9 %, pero sólo el 57,4 % cambia de ciclo y
 uno de cada cinco repite otra vez), de modo que se acumula en los ciclos bajos.
 
 > **La marca `Desertor` de la base no sirve para esto.** Su regla interna es «no
@@ -168,6 +168,10 @@ están escritas a mano en `doc_parte2.js` a `doc_parte4.js` y no se generan desd
 ## Nota sobre el semestre en curso
 
 Al extraer la base, comprobar si el último semestre tiene la matrícula cerrada.
-En la base de 2026 el semestre 2026-II seguía admitiendo altas en la fecha de
-extracción, lo que introduce un sesgo aparente en las comparaciones de validación
-que apuntan a ese semestre. Está documentado en el apartado 8.4 del documento.
+En la base del 14 de septiembre de 2026 el semestre 2026-II seguía admitiendo
+altas, aunque ya al 99 % de su campaña: faltan del orden de doscientas
+matrículas. Eso deja un sesgo residual de +126 estudiantes en las comparaciones
+de validación que apuntan a ese semestre. El apartado 8.4 del documento lo
+documenta y contrasta las dos extracciones de esta misma base —la del 10 y la del
+14 de septiembre— para mostrar el efecto: 196 matrículas nuevas redujeron ese
+sesgo a la mitad y el error del total una cuarta parte.

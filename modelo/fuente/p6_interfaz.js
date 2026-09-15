@@ -473,7 +473,7 @@ async function descargarPlantilla() {
     ['                perdieron el que cursaban y lo retoman.'],
     ['  Reiniciados   interrumpieron uno o más semestres y volvieron a matricularse.'],
     ['Conviene mirarlos por separado al planificar, porque el riesgo no es el mismo: el'],
-    ['reiniciado se cae de la matrícula (continúa el 58 % frente al 86 % de un regular) y el'],
+    ['reiniciado se cae de la matrícula (continúa el 59 % frente al 86 % de un regular) y el'],
     ['recuperado se queda, pero no avanza (sólo el 57 % cambia de ciclo, y uno de cada cinco'],
     ['repite otra vez), de modo que se acumula en los ciclos bajos.'],
     [],
