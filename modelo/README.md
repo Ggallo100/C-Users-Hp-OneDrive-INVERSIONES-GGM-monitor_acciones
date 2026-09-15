@@ -112,6 +112,7 @@ por defecto del control del HTML no hace falta tocarlo: la interfaz lo lee de
 | `paridad.py` | Reagrega `compacto.json` con la misma aritmética que el motor JavaScript y escribe `paridad_py.json`, la referencia contra la que se verifica. |
 | `ablacion.py` | Contraste de especificación: ejecuta la canalización completa con y sin una dimensión y compara el error en los niveles comunes. Admite `modalidad` o `condicion` como argumento. |
 | `preparar_prueba.py` | Genera los dos archivos de ingresantes de prueba, con y sin columna de modalidad. |
+| `tablas_condicion.py` | Genera `../tablas_continuadores.xlsx`: la matrícula clasificada por condición de llegada a lo largo de todos los semestres, abierta por carrera, por modalidad y por ciclo, más una hoja de detalle en formato largo para tablas dinámicas. |
 | `descriptivos.py` | Recalcula las cifras descriptivas que citan los capítulos 1, 4 y 5 del documento (composición por condición, retención y avance de cada una, decaimiento de la cicatriz, permanencia de turno). No forma parte de la estimación: evita tener que rehacerlas a mano al actualizar la base. |
 
 ## Verificación
