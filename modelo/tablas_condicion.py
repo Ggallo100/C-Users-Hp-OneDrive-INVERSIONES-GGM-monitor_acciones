@@ -48,7 +48,8 @@ def censurada(cond, p):
     return False
 
 
-def bloque(ws, fila, titulo, tabla, periodos, cond=None, pct=False, cond_fila=False):
+def bloque(ws, fila, titulo, tabla, periodos, cond=None, pct=False, cond_fila=False,
+           etiq=None, tot_rotulo=None, tot_fn=None):
     """
     Escribe un bloque categoría × semestre y devuelve la fila siguiente.
 
@@ -66,18 +67,20 @@ def bloque(ws, fila, titulo, tabla, periodos, cond=None, pct=False, cond_fila=Fa
     ws.cell(row=fila, column=1).fill = CAB
     ws.cell(row=fila, column=1).border = BORDE
     for j, p in enumerate(periodos):
-        c = ws.cell(row=fila, column=2 + j, value=rotulo(p))
+        c = ws.cell(row=fila, column=2 + j, value=(etiq or rotulo)(p))
         c.font = Font(bold=True)
         c.fill = CENS if (cond and censurada(cond, p)) else CAB
         c.alignment = Alignment(horizontal="center")
         c.border = BORDE
     c = ws.cell(row=fila, column=2 + len(periodos),
-                value="Total" if not pct else "Media sin censura")
+                value=tot_rotulo or ("Total" if not pct else "Media sin censura"))
     c.font = Font(bold=True)
     c.fill = CAB
     c.alignment = Alignment(horizontal="center")
     c.border = BORDE
     fila += 1
+    et_col = [(etiq or rotulo)(p) for p in periodos]
+    pctcol = {j for j, e in enumerate(et_col) if str(e).strip().startswith("%")}
     for et, r in tabla.iterrows():
         es_tot = str(et).startswith("TOTAL")
         cf = str(et) if cond_fila else cond
@@ -88,22 +91,29 @@ def bloque(ws, fila, titulo, tabla, periodos, cond=None, pct=False, cond_fila=Fa
             c.fill = TOT
         for j, p in enumerate(periodos):
             v = r.get(p, 0)
-            c = ws.cell(row=fila, column=2 + j,
-                        value=(float(v) / 100 if pct else int(v)))
-            c.number_format = "0,0 %" if pct else "#,##0"
+            if j in pctcol:
+                c = ws.cell(row=fila, column=2 + j, value=round(float(v), 2))
+                c.number_format = '0.00" %"'
+            else:
+                c = ws.cell(row=fila, column=2 + j,
+                            value=(float(v) / 100 if pct else int(v)))
+                c.number_format = "0,0 %" if pct else "#,##0"
             c.border = BORDE
             if es_tot:
                 c.font = Font(bold=True)
                 c.fill = TOT
             elif cf and censurada(cf, p):
                 c.fill = CENS
-        if pct:
+        if tot_fn == "ninguno":
+            fila += 1
+            continue
+        if tot_fn == "suma" or (tot_fn is None and not pct):
+            tot = r.sum()
+        else:
             # La media omite los semestres en que la condición no es observable:
             # promediar ceros censurados subestimaría la proporción real.
             vis = [r.get(p, 0) for p in periodos if not (cf and censurada(cf, p))]
             tot = float(np.mean(vis)) if vis else 0.0
-        else:
-            tot = r.sum()
         c = ws.cell(row=fila, column=2 + len(periodos),
                     value=(float(tot) / 100 if pct else int(tot)))
         c.number_format = "0,0 %" if pct else "#,##0"
@@ -152,6 +162,91 @@ def apertura(wb, nombre, b, campo, periodos, orden=None):
     return ws
 
 
+def ingresantes(wb, b, periodos):
+    """
+    Dos hojas sobre el ciclo en que ENTRAN los ingresantes: no todos lo hacen
+    en el primero, y el reparto tiene estructura.
+    """
+    ing = b[b["esNuevo"] == 1].copy()
+    ing["Ciclo"] = ing["Ciclo"].astype(int)
+    ciclos = sorted(ing["Ciclo"].unique())
+    ident = lambda c: ("Ciclo %d" % c)
+
+    # ---- hoja 1: institucional y forma del reparto -------------------------
+    ws = wb.create_sheet("Ingresantes por ciclo")
+    ancho(ws, 26, 11)
+    t = pd.crosstab(ing["Periodo_real"], ing["Ciclo"]).reindex(
+        index=periodos, columns=ciclos).fillna(0)
+    t.index = [rotulo(p) for p in periodos]
+    t.index.name = "Semestre"
+    t.loc["TOTAL"] = t.sum()
+    fila = bloque(ws, 1, "INGRESANTES POR CICLO DE INGRESO", t, ciclos, etiq=ident)
+    pc = 100 * t.iloc[:-1].div(t.iloc[:-1].sum(axis=1), axis=0)
+    pc.index.name = "Semestre"
+    pc.loc["TOTAL"] = 100 * t.iloc[:-1].sum() / t.iloc[:-1].sum().sum()
+    fila = bloque(ws, fila, "REPARTO DE CADA SEMESTRE (%)", pc, ciclos,
+                  pct=True, etiq=ident, tot_rotulo="Suma", tot_fn="suma")
+
+    # nivel frente a proporción: el recuento de ingreso alto es mucho más
+    # estable que su cuota, porque la que se mueve es la campaña de ciclo 1
+    n1 = t.iloc[:-1][1]
+    nm = t.iloc[:-1].drop(columns=[1]).sum(axis=1)
+    d = pd.DataFrame({"Ingresantes en ciclo 1": n1,
+                      "Ingresantes por encima del ciclo 1": nm}).T
+    d.index.name = "Recuento"
+    fila = bloque(ws, fila, "NIVEL FRENTE A PROPORCIÓN: LA CLAVE DEL PATRÓN",
+                  d, list(d.columns), etiq=lambda x: x, tot_rotulo="Total")
+    q = pd.DataFrame({"% que NO entra en ciclo 1": 100 * nm / (n1 + nm)}).T
+    q.index.name = "Proporción"
+    fila = bloque(ws, fila, "", q, list(q.columns), pct=True,
+                  etiq=lambda x: x, tot_rotulo="Media")
+
+    # forma condicional por semestre
+    alto = ing[ing["Ciclo"] > 1]
+    cl = sorted(alto["Ciclo"].clip(upper=5).unique())
+    t2 = pd.crosstab(alto["Periodo_real"], alto["Ciclo"].clip(upper=5)).reindex(
+        index=periodos, columns=cl).fillna(0)
+    pc2 = 100 * t2.div(t2.sum(axis=1), axis=0)
+    pc2.index = [rotulo(p) for p in periodos]
+    pc2.index.name = "Semestre"
+    pc2.loc["TOTAL"] = 100 * t2.sum() / t2.sum().sum()
+    fila = bloque(ws, fila, "DE LOS QUE ENTRAN POR ENCIMA DEL CICLO 1, ¿A QUÉ CICLO LLEGAN? (%)",
+                  pc2, cl, pct=True,
+                  etiq=lambda c: ("Ciclo 5 o más" if c == 5 else "Ciclo %d" % c),
+                  tot_rotulo="Suma", tot_fn="suma")
+
+    # ---- hoja 2: carrera y modalidad ---------------------------------------
+    ws = wb.create_sheet("Ingr. carrera y modalidad")
+    ancho(ws, 44, 11)
+    fila = 1
+    for campo, titulo in (("Carrera", "CARRERA"), ("Modalidad", "MODALIDAD"), ("Sede", "SEDE")):
+        t = pd.crosstab(ing[campo], ing["Ciclo"]).reindex(columns=ciclos).fillna(0)
+        t.index.name = campo
+        t["Total"] = t.sum(axis=1)
+        t["No entra en ciclo 1"] = t["Total"] - t[1]
+        t["% que no entra en ciclo 1"] = (100 * t["No entra en ciclo 1"] / t["Total"]).round(2)
+        t = t.sort_values("% que no entra en ciclo 1", ascending=False)
+        t.loc["TOTAL institucional"] = t.sum()
+        t.loc["TOTAL institucional", "% que no entra en ciclo 1"] = round(
+            100 * t.loc["TOTAL institucional", "No entra en ciclo 1"]
+            / t.loc["TOTAL institucional", "Total"], 2)
+        cols = ciclos + ["Total", "No entra en ciclo 1", "% que no entra en ciclo 1"]
+        fila = bloque(ws, fila, "INGRESANTES POR %s Y CICLO DE INGRESO" % titulo,
+                      t[cols], cols,
+                      etiq=lambda c: (("Ciclo %d" % c) if isinstance(c, (int, np.integer)) else c),
+                      tot_fn="ninguno")
+    # cruce carrera x modalidad del nivel
+    t = ing.pivot_table(index="Carrera", columns="Modalidad", values="Ciclo",
+                        aggfunc=lambda x: 100 * (np.asarray(x) > 1).mean()).round(1)
+    n = ing.pivot_table(index="Carrera", columns="Modalidad", values="Ciclo", aggfunc="size")
+    t = t.where(n >= 50)
+    t.index.name = "Carrera"
+    bloque(ws, fila, "% QUE NO ENTRA EN CICLO 1, POR CARRERA Y MODALIDAD (celdas con n ≥ 50)",
+           t.fillna(0), list(t.columns), pct=True,
+           etiq=lambda x: x, tot_rotulo="Media")
+    return ws
+
+
 def leeme(wb, b, periodos, n):
     ws = wb.create_sheet("Léeme", 0)
     ws.column_dimensions["A"].width = 120
@@ -196,6 +291,9 @@ def leeme(wb, b, periodos, n):
         ("Por carrera     Las 25 carreras, con los cinco bloques de recuento y los tres de %.", False),
         ("Por modalidad   Presencial, semipresencial y a distancia.", False),
         ("Por ciclo       Los once ciclos del plan.", False),
+        ("Ingresantes por ciclo        En qué ciclo entran los nuevos: el 96,2 % en el primero,", False),
+        ("                             pero 1 205 no. Reparto por semestre y forma del ingreso alto.", False),
+        ("Ingr. carrera y modalidad    El mismo reparto abierto por carrera, modalidad y sede.", False),
         ("Detalle         Formato largo (una fila por combinación) para tablas dinámicas.", False),
         ("                Incluye la sede, por si se quiere abrir también por ella.", False),
         ("", False),
@@ -237,6 +335,8 @@ def main():
     apertura(wb, "Por modalidad", b, "Modalidad", periodos)
     b["Ciclo"] = b["Ciclo"].astype(int)
     apertura(wb, "Por ciclo", b, "Ciclo", periodos, orden=sorted(b["Ciclo"].unique()))
+
+    ingresantes(wb, b, periodos)
 
     # ---- detalle en formato largo ------------------------------------------
     ws = wb.create_sheet("Detalle")
