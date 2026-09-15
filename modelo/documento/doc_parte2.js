@@ -82,10 +82,10 @@ function resumenEjecutivo() {
     tabla([2700, 2100, 2100, 2126],
       ['Nivel de agregación', 'Sin modalidad', 'Con modalidad', 'Reducción'],
       [
-        ['Total institucional', '1,99 %', '1,65 %', '17,2 %'],
-        ['Sede', '2,30 %', '1,65 %', '28,4 %'],
-        ['Carrera', '3,17 %', '2,76 %', '13,1 %'],
-        ['Sede × carrera', '3,47 %', '2,90 %', '16,2 %'],
+        ['Total institucional', '1,75 %', '1,15 %', '34,2 %'],
+        ['Sede', '2,01 %', '1,15 %', '42,7 %'],
+        ['Carrera', '2,95 %', '2,43 %', '17,9 %'],
+        ['Sede × carrera', '3,22 %', '2,60 %', '19,3 %'],
       ]),
     pieTabla('Error fuera de muestra (EPAP) de las dos especificaciones, medido en los niveles de agregación que existen en ambas. En cada caso la ponderación de recencia se elige por validación cruzada dentro de la propia especificación. Apartado 6.5.'),
 
@@ -102,7 +102,7 @@ function resumenEjecutivo() {
         ['Sede × carrera', '3,65 %', '2,60 %', '28,9 %'],
       ]),
     pieTabla('Error fuera de muestra (EPAP) con y sin la dimensión de continuidad, medido en los niveles de agregación que existen en ambas especificaciones. En cada caso la ponderación de recencia se elige por validación cruzada dentro de la propia especificación. Apartado 6.6.'),
-    p('El sesgo medio del total baja además de +187 a +32 estudiantes, una reducción de más de cinco sextos. Es con diferencia la mejora más grande que ha aportado una sola dimensión a este modelo, por delante de la modalidad.'),
+    p([txt('El sesgo medio del total baja además de +187 a +32 estudiantes, una reducción de más de cinco sextos. Conviene leer las dos ablaciones juntas: cada una mide lo que aporta '), cur('su'), txt(' dimensión dado que la otra ya está, y ambas salen grandes —del 18 % al 43 % la modalidad, del 29 % al 40 % la continuidad—. Eso quiere decir que '), neg('ninguna de las dos es redundante'), txt(': no están capturando la misma deriva por caminos distintos. La continuidad aporta más en los niveles de carrera y la modalidad algo más en el de sede, que es coherente con lo que cada una describe.')]),
 
     h2('1.4 Resultados de la validación'),
     p('El modelo se validó fuera de muestra con backtesting de origen móvil: se reestima con la información disponible hasta un semestre de corte y se proyecta el resto, comparando con lo que efectivamente ocurrió.'),
