@@ -93,13 +93,46 @@ class Repartidor:
         self.plan = self.p.get("planCiclos", {})
         self.plan_def = self.p.get("planDefecto", 10)
         self.apertura = self.p.get("sedeApertura", {})
+        self.catalogo = set(self.p.get("carreras", []))
+        # Apertura de los programas que no figuran en el histórico; la fija
+        # `registrar_nuevos` a partir del propio archivo de entrada.
+        self.nuevas = {}
+
+    def registrar_nuevos(self, filas):
+        """
+        Localiza los programas sin historia y fija su semestre de apertura.
+
+        Un programa que arranca no imparte todavía ciclos superiores: en su
+        primer semestre sólo existe el ciclo 1, en el segundo el 1 y el 2, y
+        así sucesivamente, a medida que avanza su primera cohorte. Es la misma
+        maduración que la de una sede nueva. Sin esto, el reparto estimado
+        colocaría convalidaciones en ciclos que el programa no imparte.
+
+        El ciclo base es el mayor declarado en el semestre de apertura —por si
+        el programa se lanza convalidando desde otro afín— y 1 si no se declara
+        ninguno, que es el caso normal.
+        """
+        for carr, per, ciclo in filas:
+            if carr in self.catalogo:
+                continue
+            ap = self.nuevas.setdefault(carr, {"inicio": per, "cicloBase": 1})
+            if per < ap["inicio"]:
+                ap["inicio"] = per
+                ap["cicloBase"] = 1
+            if ciclo and per == ap["inicio"]:
+                ap["cicloBase"] = max(ap["cicloBase"], int(ciclo))
+        return self.nuevas
 
     def tope(self, sede, carrera, periodo, plan_decl=0):
-        """Ciclo máximo admisible: el terminal del plan y el de maduración."""
+        """Ciclo máximo admisible: plan, maduración de sede y de programa."""
         t = plan_decl or self.plan.get(carrera, self.plan_def)
         ap = self.apertura.get(sede)
         if ap and ap.get("enMaduracion"):
             t = min(t, self.M.tope_sede(sede, periodo))
+        nueva = self.nuevas.get(carrera)
+        if nueva:
+            avance = E.indice_periodo(periodo) - E.indice_periodo(nueva["inicio"])
+            t = min(t, nueva["cicloBase"] + avance)
         return max(1, int(t))
 
     def reparto(self, sede, carrera, moda, periodo, plan_decl=0):
@@ -194,6 +227,21 @@ def main():
     for j in range(1, len(CAB) + 1):
         o.cell(row=1, column=j).font = Font(bold=True)
         o.cell(row=1, column=j).fill = CABF
+
+    # Primera pasada: fijar la apertura de los programas sin historia, porque
+    # el tope de una fila depende del semestre en que arranca su programa.
+    previas = []
+    for f in filas[1:]:
+        if f is None or all(x is None for x in f):
+            continue
+        try:
+            previas.append((str(f[ic]).strip().upper(), leer_periodo(f[ip]), None))
+        except (TypeError, ValueError):
+            continue
+    R.registrar_nuevos(previas)
+    if R.nuevas:
+        print("  programas sin historia: %s" % ", ".join(
+            "%s (abre %s)" % (c, rotulo(a["inicio"])) for c, a in sorted(R.nuevas.items())))
 
     n_in = n_out = 0
     n_filas = 0

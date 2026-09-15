@@ -9,6 +9,9 @@ Genera los dos archivos de ingresantes de prueba en `fuente/descargas/`:
   ingresantes_sin_ciclo.xlsx       sin Ciclo: el modelo lo reparte entre los
                                    ciclos donde el histórico registra
                                    convalidaciones
+  ingresantes_programa_nuevo.xlsx  sin Ciclo y con un programa sin historia,
+                                   que sólo puede ofrecer el ciclo 1 en su
+                                   semestre de apertura
 
 La base es el último ingreso observado de cada paridad, tomado de
 `compacto.json`, proyectado a los cuatro semestres siguientes. Sobre esa base se
@@ -73,6 +76,24 @@ def casos_limite(futuros):
     return ia + este
 
 
+def programa_nuevo(futuros):
+    """
+    Un programa sin historia junto a otro con historia, sin declarar ciclo.
+
+    El programa nuevo sólo puede ofrecer el ciclo 1 en su semestre de apertura
+    y despliega uno más en cada semestre siguiente; el que tiene historia
+    conserva su reparto estimado completo. Es el contraste que comprueba
+    `fuente/probar_sin_ciclo.js`.
+    """
+    out = []
+    for T, f in zip(futuros, (1.0, 0.6, 1.0, 0.6)):
+        r = rotulo(T)
+        out.append([r, "Lima Sur", "CONTABILIDAD", "Presencial", 1, round(200 * f), None])
+        out.append([r, "Lima Sur", "INTELIGENCIA ARTIFICIAL", "Presencial", 1, round(120 * f), 8])
+        out.append([r, "Lima Sur", "INTELIGENCIA ARTIFICIAL", "A distancia", 1, round(80 * f), 8])
+    return out
+
+
 def escribe(ruta, filas, con_modalidad=True, con_ciclo=True):
     """Escribe el Excel omitiendo las columnas opcionales que se indiquen."""
     quitar = set()
@@ -114,6 +135,8 @@ def main():
             con_modalidad=False)
     escribe(os.path.join(SALIDA, "ingresantes_sin_ciclo.xlsx"), filas,
             con_ciclo=False)
+    escribe(os.path.join(SALIDA, "ingresantes_programa_nuevo.xlsx"),
+            programa_nuevo(futuros), con_ciclo=False)
 
 
 if __name__ == "__main__":

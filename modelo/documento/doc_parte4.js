@@ -125,7 +125,7 @@ function manual() {
 
     h3('9.2.1 Si no se sabe en qué ciclo entrarán'),
     p([txt('La planificación de la admisión suele fijar un objetivo por carrera y modalidad, no por ciclo. Para ese caso la columna '), neg('Ciclo puede omitirse'), txt(': basta declarar el total por semestre, sede, carrera y modalidad, y el modelo lo reparte entre los ciclos donde el histórico registra convalidaciones.')]),
-    p('El reparto sale del apartado 6.10 y respeta dos restricciones: el ciclo terminal del plan de la carrera y el tope de maduración de una sede recién abierta. Usa además el método del resto mayor, de modo que la suma por fila coincide exactamente con el total declarado: no se pierde ni se inventa ningún ingresante.'),
+    p([txt('El reparto sale del apartado 6.10 y respeta tres restricciones: el ciclo terminal del plan de la carrera, el tope de maduración de una sede recién abierta y el de un '), neg('programa recién abierto'), txt(', que en su primer semestre sólo imparte el ciclo 1 y despliega uno más en cada semestre siguiente. Usa además el método del resto mayor, de modo que la suma por fila coincide exactamente con el total declarado: no se pierde ni se inventa ningún ingresante.')]),
     nota('Conviene declarar el ciclo cuando se conozca.', 'La estimación describe el comportamiento medio del histórico, no una política de admisión. Si la universidad va a abrir una convocatoria de traslados o a cambiar su política de convalidaciones, esa decisión no está en los datos y el modelo no puede anticiparla: ahí el ciclo hay que declararlo. Lo mismo vale para el sentido contrario, un endurecimiento de los requisitos de convalidación. La estimación es un buen punto de partida, no un sustituto de lo que el área de admisión ya sabe.'),
     p([txt('Quien prefiera trabajar fuera del navegador tiene el mismo reparto como programa aparte: '), cur('modelo/repartir_ingresantes.py'), txt(' toma un Excel sin columna de ciclo y escribe otro con ella, listo para cargar, más una hoja con las tasas aplicadas a cada combinación y el nivel de la cascada del que proceden.')]),
 
@@ -253,6 +253,20 @@ function programasNuevos() {
       'Tomó el reparto por turno de la distribución institucional de cada modalidad, al no haber ninguna evidencia propia de esa sede.',
     ]),
     nota('Sobre el turno de una sede nueva.', 'Es la estimación más frágil de todo el modelo. El turno depende del perfil del alumnado de cada sede —Lima Norte y Lima Sur ni siquiera comparten catálogo de turnos— y una sede nueva no aporta ninguna información al respecto. Incorporar la modalidad mitiga el problema, porque una carrera a distancia es nocturna con independencia de la sede, pero no lo resuelve para la parte presencial. Conviene revisar ese reparto en cuanto exista un semestre de matrícula real.'),
+    h2('10.5 Un programa nuevo también madura'),
+    p([txt('La maduración no es privativa de las sedes. Un programa que arranca tampoco tiene ciclos superiores que ofrecer, y eso importa en cuanto el archivo de entrada deja el ciclo sin declarar: sin la restricción, el reparto estimado del apartado 6.10 le aplicaría la tasa de convalidación de su modalidad —en torno a un 4 %— y colocaría ingresantes en '), neg('ciclos que el programa no imparte'), txt('.')]),
+    p('El modelo lo trata igual que a una sede nueva: el programa se da por abierto en el primer semestre en que aparece, con ciclo base el mayor que se declare en ese semestre —1 si no se declara ninguno, que es el caso normal— y despliega un ciclo más en cada semestre siguiente.'),
+    tabla([2000, 2100, 2100, 2126],
+      ['Semestre', 'Ciclos que imparte', 'Ingresantes declarados', 'Reparto estimado'],
+      [
+        ['2027-I (apertura)', 'sólo el 1', '200', '200 en el ciclo 1'],
+        ['2027-II', '1 y 2', '120', '114 · 6'],
+        ['2028-I', '1 a 3', '200', '194 · 4 · 2'],
+        ['2028-II', '1 a 4', '120', '114 · 3 · 1 · 2'],
+      ], { al: [AlignmentType.LEFT, AlignmentType.CENTER, AlignmentType.CENTER, AlignmentType.CENTER] }),
+    pieTabla('Reparto por ciclo de un programa sin historia que no declara el ciclo, tal como lo resuelve el modelo. Cifras de la prueba automática `fuente/probar_sin_ciclo.js`, que las comprueba en cada reconstrucción.'),
+    p([txt('En el semestre de apertura el reparto es '), neg('exacto, no estimado'), txt(': no hay nada que estimar, porque sólo existe un ciclo posible. A partir de ahí la estimación entra en juego sobre los ciclos que ya se imparten, y converge al comportamiento propio del programa en cuanto éste acumula historia.')]),
+
     nota('Lectura de cautela.', 'Que el modelo proyecte un programa nuevo no significa que acierte. Está aplicando el comportamiento medio de su modalidad a una población de la que no sabe nada, y un programa nuevo puede atraer un perfil de estudiante con retención distinta. La cifra es una hipótesis razonada de partida, no una previsión con la misma solidez que la de un programa consolidado. Conviene revisarla en cuanto existan dos o tres semestres de historia propia.'),
     salto(),
   ];

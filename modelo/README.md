@@ -169,9 +169,17 @@ los primeros semestres y del 4,9 % al 5,9 % en los segundos, pero el recuento de
 convalidados es estable (129 a 172 de media) mientras que la campaña de ciclo 1
 se duplica. Lo que cambia es el denominador.
 
-El reparto respeta el ciclo terminal del plan y el tope de maduración de una sede
-nueva, y usa el método del resto mayor para que la suma coincida exactamente con
-el total declarado.
+El reparto respeta tres topes —el ciclo terminal del plan, la maduración de una
+sede nueva y la de un programa nuevo— y usa el método del resto mayor para que la
+suma coincida exactamente con el total declarado.
+
+Un **programa sin historia** merece mención aparte: en el semestre en que aparece
+por primera vez sólo imparte el ciclo 1, de modo que todos sus ingresantes van
+ahí; despliega un ciclo más en cada semestre siguiente, conforme avanza su
+primera cohorte. Es la misma maduración que la de una sede nueva y responde al
+mismo hecho físico: no se puede convalidar hacia un ciclo que todavía no existe.
+El ciclo base es el mayor declarado en el semestre de apertura, por si el
+programa se lanza convalidando desde otro afín.
 
 ## El documento Word
 

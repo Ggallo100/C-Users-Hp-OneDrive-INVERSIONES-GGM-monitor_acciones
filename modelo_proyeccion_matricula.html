@@ -2051,6 +2051,7 @@ const S = {
   planPorIc: DATOS.carreras.map(c => DATOS.planCiclos[c] || DATOS.planDefecto),
   aperturaPorIs: DATOS.sedes.map(s => DATOS.sedeApertura[s] || { enMaduracion: false }),
   carrerasNuevas: new Set(),
+  aperturaPorIc: [],
   sedesNuevas: new Set(),
   entrada: null,      // { nombre, filas, periodos, avisos }
   proy: null,
@@ -2074,6 +2075,21 @@ function topeCicloSede(is, T) {
   // ofrece ningún ciclo, que es lo correcto y además evita ciclos absurdos.
   return Math.max(0, ap.cicloBase + (indicePeriodo(T) - indicePeriodo(ap.inicio)));
 }
+/*
+ * Ciclo máximo que un PROGRAMA puede ofrecer en el semestre T.
+ *
+ * Un programa que arranca no tiene todavía ciclos superiores: en su primer
+ * semestre sólo existe el ciclo 1, en el segundo el 1 y el 2, y así. Es la
+ * misma maduración que la de una sede nueva, y por el mismo motivo físico:
+ * el plan se despliega a medida que la primera cohorte avanza. Sin esto, el
+ * reparto estimado colocaría convalidaciones en ciclos que aún no se imparten.
+ */
+function topeCicloCarrera(ic, T) {
+  const ap = S.aperturaPorIc[ic];
+  if (!ap || !ap.enMaduracion) return 1e6;
+  return Math.max(0, ap.cicloBase + (indicePeriodo(T) - indicePeriodo(ap.inicio)));
+}
+
 function idxCarrera(nom, ciclosPlan) {
   if (S.iC.has(nom)) {
     if (ciclosPlan) S.planPorIc[S.iC.get(nom)] = ciclosPlan;
@@ -2181,7 +2197,8 @@ function construirNuevos(E, crudo) {
     const expandidas = [];
     for (const r of filas) {
       if (r.ciclo !== null) { expandidas.push(r); continue; }
-      const tope = Math.min(S.planPorIc[r.ic], topeCicloSede(r.is, T));
+      const tope = Math.min(S.planPorIc[r.ic], topeCicloSede(r.is, T),
+                            topeCicloCarrera(r.ic, T));
       const v = cicloDeFila(E, r, T, tope);
       const n = restoMayor(r.cant, v);
       for (let c = 0; c < n.length; c++) {
@@ -2397,6 +2414,21 @@ async function cargarArchivo(file) {
       S.aperturaPorIs[is] = { inicio, cicloBase, enMaduracion: true, declarada: true };
     });
 
+    /* Apertura de los PROGRAMAS nuevos. Un programa que no figura en el
+       histórico empieza a impartirse en el primer semestre en que aparece, de
+       modo que sólo ofrece el ciclo 1 —o el mayor que se declare en ese
+       semestre, si se lanza convalidando desde un programa afín— y despliega
+       el resto a razón de un ciclo por semestre. */
+    S.aperturaPorIc = S.carreras.map(() => ({ enMaduracion: false }));
+    S.carrerasNuevas.forEach(nom => {
+      const ic = S.iC.get(nom);
+      const suyas = filas.filter(r => r.ic === ic);
+      const inicio = Math.min.apply(null, suyas.map(r => r.per));
+      const decl = suyas.filter(r => r.per === inicio && r.ciclo !== null).map(r => r.ciclo);
+      const cicloBase = decl.length ? Math.max.apply(null, decl) : 1;
+      S.aperturaPorIc[ic] = { inicio, cicloBase, enMaduracion: true };
+    });
+
     // Segunda pasada: topes de plan y de maduración de sede.
     /* El mapa guarda las filas en crudo, con la modalidad declarada o nula. El
        reparto de las no declaradas se resuelve en cada recálculo, de modo que
@@ -2423,9 +2455,18 @@ async function cargarArchivo(file) {
     for (const r of filas) {
       const topePlan = S.planPorIc[r.ic];
       const topeSed = topeCicloSede(r.is, r.per);
-      const tope = Math.min(topePlan, topeSed);
+      const topeCar = topeCicloCarrera(r.ic, r.per);
+      const tope = Math.min(topePlan, topeSed, topeCar);
       if (r.ciclo !== null && r.ciclo > tope) {
-        if (topeSed < topePlan) {
+        if (topeCar <= topeSed && topeCar < topePlan) {
+          recortes.plan++;
+          if (recortes.plan <= 3) avisos.push({
+            t: 'aviso', m: 'Fila ' + r.fila + ': ' + r.carrera + ' es un programa nuevo que ' +
+              'en ' + rotuloPeriodo(r.per) + ' sólo imparte hasta el ciclo ' + tope +
+              ' (inició en ' + rotuloPeriodo(S.aperturaPorIc[r.ic].inicio) +
+              '); esos ' + fmtN(r.cant) + ' ingresantes se asignan al ciclo ' + tope + '.'
+          });
+        } else if (topeSed < topePlan) {
           recortes.sede++;
           const vistas = (recortes.porSede.get(r.is) || 0) + 1;
           recortes.porSede.set(r.is, vistas);
@@ -2566,6 +2607,8 @@ async function descargarPlantilla() {
     ['Escriba el nombre del nuevo programa en «Carrera» y añada sus ingresantes con normalidad.'],
     ['Al no tener historia propia, el modelo le aplica el comportamiento de continuación del ciclo'],
     ['y de la sede correspondientes, e informa de ello en la pestaña «Ingresantes».'],
+    ['Además despliega su plan ciclo a ciclo desde el semestre en que aparece: en el primero'],
+    ['sólo imparte el ciclo 1, en el segundo el 1 y el 2, y así sucesivamente.'],
     ['Si el plan no dura ' + S.D.planDefecto + ' ciclos, indíquelo en «CiclosPlan».'],
     [],
     [H('Si no sabe en qué ciclo entrarán')],
@@ -2577,8 +2620,11 @@ async function descargarPlantilla() {
     ['          porque lo que baja es la campaña de ciclo 1, no el número de convalidados.'],
     ['  FORMA   a qué ciclo llegan. Es casi universal: 57 % al ciclo 2, 21 % al 3, 13 % al 4'],
     ['          y 9 % al 5 o más.'],
-    ['El reparto respeta el ciclo terminal del plan y el tope de maduración de una sede nueva,'],
-    ['y conserva el total exacto: no se pierde ni se inventa ningún ingresante.'],
+    ['El reparto respeta el ciclo terminal del plan, el tope de maduración de una sede nueva y'],
+    ['el de un programa nuevo, y conserva el total exacto: no se pierde ni se inventa a nadie.'],
+    ['Un programa que no figura en el catálogo empieza a impartirse en el primer semestre en'],
+    ['que aparece, de modo que ahí sólo existe el ciclo 1 y todos sus ingresantes van a él;'],
+    ['despliega un ciclo más en cada semestre siguiente, conforme avanza su primera cohorte.'],
     ['Conviene declarar el ciclo cuando se conozca: la estimación describe el comportamiento'],
     ['medio del histórico, no una política de admisión que vaya a cambiar.'],
     [],
