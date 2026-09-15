@@ -1,14 +1,20 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Genera `../tablas_continuadores.xlsx`: la matrícula histórica clasificada por
-condición de llegada —ingresante, regular, recuperado y reiniciado— a lo largo
-de todos los semestres, abierta por carrera, por modalidad y por ciclo.
+Genera `../tablas_continuadores.xlsx`: la matrícula clasificada por condición de
+llegada a lo largo de todos los semestres utilizables, abierta por carrera, por
+modalidad y por ciclo.
 
-La clasificación es la misma que usa el modelo y se deriva del propio panel de
-matrículas (ver `condicion_de` en estimar.py). No hay parámetros ni supuestos:
-cada matrícula cae en una y sólo una condición, de modo que las cuatro suman
-siempre el total del semestre.
+La clasificación es la OFICIAL de la universidad, la del campo `Condicion` de la
+base central, reconstruida en `central.py` con un 99,63 % de coincidencia contra
+`Tipo_estudiante`. Son cinco categorías: ingresante, regular, recuperado,
+reinicio e ingresante por nueva admisión. Cada matrícula cae en una y sólo una,
+de modo que suman exactamente el total del semestre.
+
+Ventana: seis semestres, de 2023-II a 2026-I. Quedan fuera 2023-I —donde el
+clasificador oficial no ve la matrícula anterior y marca a todos los
+continuadores como «Reinicio»—, los ciclos de verano y 2026-II, cuya extracción
+es anterior a esa campaña.
 
     python3 tablas_condicion.py
 """
@@ -20,11 +26,12 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
-import estimar as E
+import central
 
 AQUI = os.path.dirname(os.path.abspath(__file__))
 SALIDA = os.path.join(AQUI, "..", "tablas_continuadores.xlsx")
-COND = ["Ingresante", "Regular", "Recuperado", "Reiniciado"]
+COND = central.CONDICIONES          # las cinco de la clasificación oficial
+CONT = COND[1:]                     # las cuatro de continuador
 
 AZUL = "1F3864"
 CAB = PatternFill("solid", fgColor="D9E2F3")
@@ -40,11 +47,12 @@ def rotulo(p):
 
 
 def censurada(cond, p):
-    """Semestres en que la condición no es observable por el inicio de la ventana."""
-    if cond == "Recuperado":
-        return p == 202301
-    if cond == "Reiniciado":
-        return p in (202301, 202302)
+    """
+    Ya no hay censura que marcar: los semestres en que la clasificación oficial
+    no es fiable —2023-I, los veranos y 2026-II— se excluyen del libro entero
+    en vez de señalarse celda a celda. Se conserva la función porque `bloque`
+    la consulta, y para dejar constancia de la decisión.
+    """
     return False
 
 
@@ -73,7 +81,7 @@ def bloque(ws, fila, titulo, tabla, periodos, cond=None, pct=False, cond_fila=Fa
         c.alignment = Alignment(horizontal="center")
         c.border = BORDE
     c = ws.cell(row=fila, column=2 + len(periodos),
-                value=tot_rotulo or ("Total" if not pct else "Media sin censura"))
+                value=tot_rotulo or ("Total" if not pct else "Media"))
     c.font = Font(bold=True)
     c.fill = CAB
     c.alignment = Alignment(horizontal="center")
@@ -149,7 +157,7 @@ def apertura(wb, nombre, b, campo, periodos, orden=None):
     t.index.name = campo
     t.loc["TOTAL institucional"] = t.sum()
     fila = bloque(ws, fila, "TOTAL DE MATRÍCULA", t, periodos)
-    for cond in ("Regular", "Recuperado", "Reiniciado"):
+    for cond in CONT:
         num = pd.crosstab(b[b["condicion"] == cond][campo],
                           b[b["condicion"] == cond]["Periodo_real"]).reindex(
             index=tot.index, columns=periodos).fillna(0)
@@ -253,25 +261,42 @@ def leeme(wb, b, periodos, n):
     lineas = [
         ("Clasificación de la matrícula por continuidad", True),
         ("", False),
-        ("Fuente: %s" % os.path.basename(E.RUTA), False),
+        ("Fuente: %s" % os.path.basename(central.RUTA), False),
         ("Matrículas analizadas: %s registros, %d semestres (%s a %s)."
          % ("{:,}".format(n).replace(",", " "), len(periodos),
             rotulo(periodos[0]), rotulo(periodos[-1])), False),
         ("Unidad de análisis: una fila por estudiante y semestre.", False),
         ("", False),
-        ("Las cuatro condiciones", True),
-        ("INGRESANTE   Primera matrícula del estudiante (campo Nuevos de la base).", False),
-        ("REGULAR      Se matriculó también el semestre inmediato anterior y cambia de ciclo:", False),
-        ("             continúa sin interrupción.", False),
-        ("RECUPERADO   Se matriculó también el semestre inmediato anterior, pero vuelve AL MISMO", False),
-        ("             CICLO: perdió el que cursaba —figura como desertor de ese ciclo— y lo", False),
-        ("             retoma al semestre siguiente.", False),
-        ("REINICIADO   Interrumpió uno o más semestres y volvió a matricularse.", False),
+        ("Las cinco condiciones de la clasificación oficial", True),
+        ("INGRESANTE                 Primera matrícula del estudiante.", False),
+        ("REGULAR                    Cerró el semestre anterior en situación ACTIVO, TERMINÓ MALLA", False),
+        ("                           CURRICULAR o EGRESADO, y se matricula al siguiente.", False),
+        ("RECUPERADO                 NO cerró el semestre anterior —abandono de ciclo, retiro o", False),
+        ("                           inhabilitación— y aun así se matricula en el inmediato", False),
+        ("                           siguiente. Es una categoría pequeña: del orden de cien", False),
+        ("                           estudiantes por semestre, un 0,6 % de la matrícula.", False),
+        ("REINICIO                   Interrumpió uno o más semestres y volvió a matricularse.", False),
+        ("INGRESANTE NUEVA ADMISIÓN  Vuelve tras una ausencia larga por la vía de una nueva", False),
+        ("                           admisión. La universidad lo cuenta como ingresante de esa", False),
+        ("                           modalidad, pero no procede de la campaña de admisión.", False),
         ("", False),
-        ("Las cuatro condiciones parten la matrícula sin solaparse: cada matrícula cae en una y", False),
-        ("sólo una, de modo que suman exactamente el total del semestre. No se declaran en ningún", False),
-        ("sitio ni se estiman: se derivan del propio panel, comparando cada matrícula con la", False),
-        ("anterior del mismo estudiante (la brecha en semestres y el salto de ciclo).", False),
+        ("Las cinco parten la matrícula sin solaparse: cada matrícula cae en una y sólo una, de", False),
+        ("modo que suman exactamente el total del semestre.", False),
+        ("", False),
+        ("De dónde sale la clasificación", True),
+        ("Del campo «Condicion» de la base central de la universidad, que registra con qué estado", False),
+        ("académico cerró cada estudiante el semestre anterior. La regla se reconstruye en", False),
+        ("central.py y coincide con el campo «Tipo_estudiante» oficial en el 99,63 % de las 97 162", False),
+        ("matrículas de la ventana. Es la misma clasificación que usa el modelo de proyección.", False),
+        ("", False),
+        ("Por qué NO se usa el salto de ciclo", True),
+        ("Una versión anterior de estas tablas definía al recuperado como quien se rematricula sin", False),
+        ("pausa y vuelve al mismo ciclo. No es la definición de la universidad. Las dos cosas están", False),
+        ("correlacionadas —el 81,8 % de los recuperados oficiales repite ciclo— pero la implicación", False),
+        ("no se invierte: de las 4 978 llegadas sin pausa que repiten ciclo, sólo 405 son", False),
+        ("recuperadas, un 8,1 %. La mayoría de quienes repiten ciclo cerraron el semestre en", False),
+        ("situación activa y son regulares. Aquella regla daba una categoría diez veces mayor que", False),
+        ("la real.", False),
         ("", False),
         ("Por qué no se usa la columna «Desertor» de la base", True),
         ("Su regla interna es «no se matriculó el semestre inmediato siguiente» —se cumple con cero", False),
@@ -280,15 +305,19 @@ def leeme(wb, b, periodos, n):
         ("categoría vacía. Además está congelada a una fecha anterior a la campaña de 2026-II, y", False),
         ("marca como desertores al 65,5 % de los matriculados de 2026-I y al 0 % de los de 2026-II.", False),
         ("", False),
-        ("Censura al inicio de la ventana  (celdas en naranja)", True),
-        ("Para ver a un recuperado hace falta un semestre previo y para ver a un reiniciado, dos.", False),
-        ("2023-I no puede aportar ninguna de las dos categorías y 2023-II no puede aportar", False),
-        ("reiniciados: esas matrículas se cuentan como regulares. No es que no existieran, es que", False),
-        ("no son observables. A partir de 2024-I las cifras son comparables entre sí.", False),
+        ("Qué semestres quedan fuera y por qué", True),
+        ("2023-I        Es el primer semestre cargado en la base central y el clasificador no ve la", False),
+        ("              matrícula anterior: marca como «Reinicio» a los 7 855 continuadores. El", False),
+        ("              propio campo «Ultima_matricula» demuestra que 7 463 venían de 2022-II.", False),
+        ("Veranos       Los ciclos 202300, 202400... figuran íntegramente como «Reinicio» y no son", False),
+        ("              semestres regulares.", False),
+        ("2026-II       La extracción de la base central es del 18 de junio de 2026, anterior a esa", False),
+        ("              campaña: sólo trae 708 filas.", False),
+        ("Quedan seis semestres, de 2023-II a 2026-I, comparables entre sí sin salvedades.", False),
         ("", False),
         ("Hojas de este libro", True),
         ("Institucional   Los totales de la universidad, semestre a semestre.", False),
-        ("Por carrera     Las 25 carreras, con los cinco bloques de recuento y los tres de %.", False),
+        ("Por carrera     Las 25 carreras, con los cinco bloques de recuento y los cuatro de %.", False),
         ("Por modalidad   Presencial, semipresencial y a distancia.", False),
         ("Por ciclo       Los once ciclos del plan.", False),
         ("Ingresantes por ciclo        En qué ciclo entran los nuevos: el 96,2 % en el primero,", False),
@@ -307,10 +336,9 @@ def leeme(wb, b, periodos, n):
 
 
 def main():
-    df = E.cargar()
-    b, per, idx = E.panel(df)
+    b = central.ventana(central.panel(central.cargar()))
     b = b.rename(columns={"Modalidad_estudios": "Modalidad"})
-    periodos = list(per)
+    periodos = sorted(b["Periodo_real"].unique())
 
     wb = Workbook()
     wb.remove(wb.active)

@@ -276,6 +276,30 @@ def tabla_recuperado(bc, lam):
     return out
 
 
+def tabla_nueva_admision(bc):
+    """
+    Nivel y composición de los reingresos por NUEVA ADMISIÓN.
+
+    Son 339 en seis semestres, sólo en Lima Sur, repartidos por todos los
+    ciclos aunque con un tercio en el primero. No vienen en el archivo de
+    entrada ni salen del stock observado, de modo que el modelo los genera.
+    """
+    na = bc[bc["condicion"] == "Ingresante nueva admisión"]
+    if not len(na):
+        return {}
+    nsem = na.groupby("par")["Periodo_real"].nunique()
+    nivel = {str(int(pa)): round(float(v) / max(int(nsem.get(pa, 1)), 1), 4)
+             for pa, v in na.groupby("par").size().items()}
+    comp = {}
+    for pa, g in na.groupby("par"):
+        d = {}
+        for (s_, c, m, ci), v in g.groupby(
+                ["Sede", "Carrera", "Modalidad_estudios", "Ciclo"]).size().items():
+            d[f"{s_}|{c}|{m}|{int(ci)}"] = int(v)
+        comp[str(int(pa))] = d
+    return {"nivel": nivel, "comp": comp}
+
+
 def tabla_nuevos_ciclo(b, nper, lam_n):
     """
     Reparto de los ingresantes por CICLO de ingreso. Sólo se usa cuando el
@@ -392,6 +416,31 @@ def varianza_proceso(b, nper):
 _CACHE_CENTRAL = {}
 
 
+def _panel_central_alineado(per, idx):
+    """
+    Panel de la base central con el índice temporal del histórico.
+
+    La base central sólo observa hasta 2026-I, de modo que un origen suyo no
+    puede entrar en el conjunto de riesgo de un rezago que caiga más allá: el
+    truncamiento se aplica sobre `t` igual que en el histórico y el resultado
+    se recorta al corte que pida el backtesting.
+    """
+    b = _panel_central().copy()
+    b = b[b["Periodo_real"].isin(idx)].copy()
+    b["t"] = b["Periodo_real"].map(idx).astype(int)
+    # El futuro de cada estudiante se RECALCULA dentro de la ventana truncada.
+    # Si se reutilizara el del panel completo, el backtesting contaría como
+    # continuación una matrícula posterior al corte —información que el modelo
+    # no podía tener— e inflaría las tasas por encima de 1.
+    b = b.sort_values(["cod", "t"])
+    g = b.groupby("cod", sort=False)
+    b["tSig"] = g["t"].shift(-1)
+    b["cicloSig"] = g["Ciclo"].shift(-1)
+    b["condSig"] = g["condicion"].shift(-1)
+    b["rezago"] = b["tSig"] - b["t"]
+    return b
+
+
 def _panel_central():
     """Panel de la base central, cacheado: la estimación lo recorre varias veces."""
     if "b" not in _CACHE_CENTRAL:
@@ -435,7 +484,18 @@ def construir_parametros(b, per, hasta=None, lam=0.50, lam_n=0.30):
     # porque es el factor de mayor magnitud: a igualdad de ciclo y modalidad,
     # las probabilidades de continuar de un reiniciado son la quinta parte de
     # las de un regular (razón de momios 0,21). La modalidad va detrás.
-    tab = tabla_continuacion(bb, nper, lam)
+    # La continuación y el avance llevan la condición en la clave, y la
+    # condición oficial sólo la tiene la base central. Se usa su panel,
+    # realineado al mismo índice de periodos y truncado en el mismo corte que
+    # el histórico, para que el backtesting siga siendo honesto.
+    bc = _panel_central_alineado(per_u, idx)
+    # La central observa un semestre menos que el histórico: su último periodo
+    # cargado es 2026-I. Un origen suyo sólo puede entrar en el conjunto de
+    # riesgo de los rezagos que caigan dentro de ESA ventana, no de la del
+    # histórico; si no, los orígenes del último semestre parecerían no
+    # continuar y hundirían todas las tasas.
+    nper_c = int(bc["t"].max()) + 1 if len(bc) else nper
+    tab = tabla_continuacion(bc, nper_c, lam)
     dfc = pd.DataFrame(tab)
     for L in range(LAG_MAX):
         dfc[f"n{L}"] = dfc["n"].str[L]
@@ -473,7 +533,7 @@ def construir_parametros(b, per, hasta=None, lam=0.50, lam_n=0.30):
     # El reiniciado repite ciclo el doble que el regular (18,3 % frente a
     # 9,2 %) y avanza un ciclo mucho menos (69,1 % frente a 85,0 %): vuelve a
     # arrastrar los cursos que dejó.
-    av = tabla_avance(bb, nper, lam)
+    av = tabla_avance(bc, nper_c, lam)
     av_celda = {f"{c}|{m}|{cd}|{ci}": R4(av.loc[(c, m, cd, ci)].values)
                 for (c, m, cd, ci) in av.index}
     avm = av.groupby(level=["Modalidad_estudios", "condicion", "Ciclo"]).sum()
@@ -618,6 +678,7 @@ def construir_parametros(b, per, hasta=None, lam=0.50, lam_n=0.30):
         # r = P(Recuperado | rezago 1). Sale de la base central, la única que
         # trae el campo `Condicion`; ver `central.py` y el apartado 6.12.
         "recuperado": tabla_recuperado(_panel_central(), lam),
+        "nueva_admision": tabla_nueva_admision(_panel_central()),
         "av_celda": av_celda, "av_moda": av_moda, "av_cond": av_cond,
         "av_ciclo": av_ciclo,
         "av_global": R4(av.sum().values),
@@ -837,6 +898,41 @@ class Modelo:
             ("celda", p["nm_celda"].get(f"{sede}|{carrera}|{cl}|{parid}")),
         ], p["nm_global"], k)
 
+    def nueva_admision(self, parid):
+        """
+        Reingresos por NUEVA ADMISIÓN de un semestre de la paridad dada,
+        repartidos por sede, carrera, modalidad, ciclo y turno.
+
+        Se proyecta el NIVEL —unos 68 en los primeros semestres y 45 en los
+        segundos— y no una cuota, porque el nivel es lo más estable: su
+        coeficiente de variación es del 15 %, frente al 16 % y el 23 % de las
+        cuotas sobre la matrícula y sobre los continuadores. La contrapartida
+        es que no crece con la institución; con seis semestres de horizonte el
+        efecto es menor, pero conviene revisarlo si la matrícula se dispara.
+        """
+        ck = ("na", parid)
+        if ck in self._cq:
+            return self._cq[ck]
+        na = self.p.get("nueva_admision") or {}
+        comp = na.get("comp", {}).get(str(parid)) or {}
+        nivel = float((na.get("nivel") or {}).get(str(parid), 0.0))
+        tot = sum(comp.values())
+        out = {}
+        if tot > 0 and nivel > 0:
+            for clave, v in comp.items():
+                sede, carrera, moda, ciclo = clave.split("|")
+                ciclo = int(ciclo)
+                cant = nivel * v / tot
+                # El turno no lo trae la base central en condiciones de usarse,
+                # así que se reparte con el mismo estimador que el de los
+                # ingresantes, que sí sale del histórico.
+                mz, _, _ = self.mezcla_nuevos(sede, carrera, moda, ciclo, parid)
+                for ti, t2 in enumerate(self.turnos):
+                    if mz[ti] > 0:
+                        out[(sede, carrera, moda, ciclo, t2)] = cant * mz[ti]
+        self._cq[ck] = out
+        return out
+
     def tasa_recuperado(self, carrera, moda, cond, ciclo):
         """
         Fracción del flujo de rezago 1 que llega como RECUPERADO, es decir que
@@ -1031,6 +1127,21 @@ class Modelo:
                         dvar[key] = dvar.get(key, 0.0) \
                             + cant * mz[ti] * (1 - mz[ti]) \
                             + (cant ** 2) * mz[ti] * (1 - mz[ti]) / nm
+
+            # --- reingresos por NUEVA ADMISIÓN ---
+            # Ni son ingresantes declarados —no vienen en el archivo— ni salen
+            # del stock observado, porque su matrícula anterior es anterior a
+            # la ventana. El modelo los genera como nivel por paridad,
+            # repartido con la composición histórica de la categoría.
+            for (sede, carrera, moda, ciclo, t2), cant in self.nueva_admision(parid).items():
+                if cant <= 0:
+                    continue
+                ciclo = min(ciclo, p["planCiclos"].get(carrera, p["planDefecto"]),
+                            self.tope_sede(sede, T))
+                key = (sede, carrera, moda, self.condiciones[4], ciclo, t2)
+                dest[key] = dest.get(key, 0.0) + cant
+                if varianza:
+                    dvar[key] = dvar.get(key, 0.0) + cant
             res[T], resv[T] = dest, dvar
             hist[T], hvar[T] = dest, dvar
         return (res, resv) if varianza else res

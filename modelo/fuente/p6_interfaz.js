@@ -603,12 +603,14 @@ async function descargarPlantilla() {
     ['desglosados en tres grupos según cómo llegan al semestre, y ese desglose sale de la propia'],
     ['recursión, no de ningún dato de entrada:'],
     ['  Regulares     se matricularon también el semestre anterior y cambiaron de ciclo.'],
-    ['  Recuperados   se matricularon también el semestre anterior, pero vuelven al MISMO ciclo:'],
+    ['  Recuperados   se matricularon también el semestre anterior pero NO lo cerraron:'],
     ['                perdieron el que cursaban y lo retoman.'],
-    ['  Reiniciados   interrumpieron uno o más semestres y volvieron a matricularse.'],
+    ['                abandono de ciclo, retiro o inhabilitación.'],
+    ['  Reinicio      interrumpieron uno o más semestres y volvieron a matricularse.'],
+    ['  Ingres. nueva admisión   reingresaron por nueva admisión tras una ausencia larga.'],
     ['Conviene mirarlos por separado al planificar, porque el riesgo no es el mismo: el'],
-    ['reiniciado se cae de la matrícula (continúa el 59 % frente al 86 % de un regular) y el'],
-    ['recuperado se queda, pero no avanza (sólo el 57 % cambia de ciclo, y uno de cada cinco'],
+    ['reinicio se cae de la matrícula (continúa el 61 % frente al 86 % de un regular) y el'],
+    ['recuperado se queda, pero no avanza (sólo el 49 % cambia de ciclo, y casi dos de cada cinco'],
     ['repite otra vez), de modo que se acumula en los ciclos bajos.'],
     [],
     [H('Sedes nuevas y maduración')],
@@ -819,9 +821,11 @@ function pintarPorCondicion() {
 }
 
 /**
- * Reparto de una celda-mapa por condición de llegada. El índice 0 es el
- * ingresante y los tres siguientes son los continuadores: regular, reiniciado
- * y recuperado. Como la condición forma parte de la clave del estado, el desglose
+ * Reparto de una celda-mapa por condición de llegada, en el orden de
+ * `S.D.condiciones`: ingresante, regular, recuperado, reinicio y el reingreso
+ * por nueva admisión. Los cuatro últimos son continuadores —la nueva admisión
+ * también lo es, porque no es un alumno nuevo sino uno que vuelve tras una
+ * ausencia larga—. Como la condición forma parte de la clave del estado, el desglose
  * es exacto y suma siempre el total.
  */
 function porCondicion(mapa) {
@@ -846,7 +850,7 @@ function pintarTablaResumen() {
     '<th rowspan="2">Optimista</th>' +
     '<th rowspan="2">Intervalo de predicción ' + fmtP(P.conf) + '</th>' +
     '<th rowspan="2">Variación</th></tr>' +
-    '<tr><th>Regulares</th><th>Reiniciados</th><th>Recuperados</th>' +
+    '<tr><th>Regulares</th><th>Recuperados</th><th>Reinicio</th><th>Nueva adm.</th>' +
     '<th>Total</th></tr></thead><tbody>');
   const ipUlt = S.D.periodos.length - 1;
   const obs = porCondicionObs(ipUlt);
@@ -929,7 +933,7 @@ const VALOR_DIM = {
   Ciclo: d => d.ciclo, Turno: d => S.D.turnos[d.it],
 };
 /* La condición se ordena por el orden natural del catálogo —ingresante,
-   regular, reiniciado, recuperado— y no alfabéticamente. */
+   regular, recuperado, reinicio, nueva admisión— y no alfabéticamente. */
 const ORDEN_DIM = { Condición: d => d.id };
 function etiquetaDim(dim, c) {
   if (dim === 'Periodo') return rotuloPeriodo(c.T);

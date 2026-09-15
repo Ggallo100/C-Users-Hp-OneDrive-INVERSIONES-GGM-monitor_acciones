@@ -132,9 +132,10 @@
     <header><h2>Continuadores por continuidad de la matrícula</h2></header>
     <div class="nota">
       Serie observada y proyectada, escenario moderado. El regular se matriculó
-      también el semestre anterior y cambió de ciclo; el recuperado también se
-      matriculó, pero vuelve al mismo ciclo porque perdió el que cursaba; el
-      reiniciado interrumpió uno o más semestres. El desglose no es una
+      también el semestre anterior y lo cerró activo; el recuperado también se
+      matriculó, pero no cerró el anterior —abandono, retiro o inhabilitación—;
+      el reinicio interrumpió uno o más semestres; y la nueva admisión es un
+      reingreso tras una ausencia larga. El desglose no es una
       etiqueta añadida al resultado: la condición forma parte del estado del
       modelo, de modo que cada barra es exactamente la suma de sus celdas.
     </div>
@@ -280,22 +281,24 @@
     <header><h2>Continuidad de la matrícula</h2><span class="mini">dimensión del estado</span></header>
     <p class="txt">
       La condición de llegada es el factor de mayor magnitud del modelo, por
-      delante de la modalidad, y separa dos riesgos distintos. El reiniciado
-      —el que interrumpió— es un problema de retención: continúa el 59 % de
-      las veces frente al 86 % de un regular, y la brecha no se cierra en todo
-      el plan. El recuperado —el que sigue matriculado pero repite ciclo— pierde
-      mucha menos matrícula (71 %): lo que pierde es tiempo, porque sólo el 57 %
-      avanza de ciclo y uno de cada cinco vuelve a repetir.
+      delante de la modalidad. La clasificación es la de la base central de la
+      universidad: lo que separa a un regular de un recuperado no es el salto de
+      ciclo sino haber cerrado o no el semestre anterior. El reinicio —el que
+      interrumpió— continúa el 61,2 % de las veces frente al 85,5 % de un
+      regular. El recuperado —el que abandonó, se retiró o quedó inhabilitado y
+      aun así se matricula— continúa el 63,8 %, y sobre todo no avanza: repite
+      ciclo el 37,8 % de las veces, cuatro veces más que un regular.
     </p>
     <div class="leyenda" id="legContCond"></div>
     <div class="lienzo" id="grContCond"></div>
     <p class="txt" style="margin-top:10px">
       La condición no se declara en ningún sitio ni necesita matriz de
       transición: la determinan el rezago y el salto de ciclo del propio flujo.
-      Quien se rematricula al semestre siguiente llega como recuperado si vuelve
-      al mismo ciclo y como regular si cambia de ciclo; quien vuelve tras
-      saltarse uno o más semestres, como reiniciado. Por eso el
-      desglose de las tablas sale de la recursión sin ningún parámetro añadido.
+      Quien vuelve tras saltarse uno o más semestres llega como reinicio. Quien
+      se rematricula al semestre siguiente se reparte entre regular y recuperado
+      según la fracción que no cerró el semestre anterior, estimada de la base
+      central por ciclo y condición de origen: vale un 0,8 % de media, pero
+      llega al 21 % cuando el origen ya era recuperado.
     </p>
     <div class="envoltura"><table id="tbCondicion"></table></div>
   </div>

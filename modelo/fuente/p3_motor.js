@@ -547,6 +547,31 @@ function tasaRecuperado(E, ic, im, id, ciclo) {
   return Math.min(Math.max(est, 0), 1);
 }
 
+/*
+ * Reingresos por nueva admisión de un semestre de la paridad dada, como
+ * [is, ic, im, ciclo, cantidad]. Se proyecta el NIVEL —unos 68 en los primeros
+ * semestres y 45 en los segundos— y no una cuota, porque el nivel es lo más
+ * estable de las tres alternativas medidas.
+ */
+function nuevaAdmision(E, par) {
+  const ck = 'na' + par;
+  const hit = E.cacheNc.get(ck); if (hit) return hit;
+  const D = E.D, filas = [];
+  const nivel = +((D.naNivel || {})[String(par)] || 0);
+  if (nivel > 0 && D.na) {
+    let tot = 0;
+    for (const f of D.na) if (f[4] === par) tot += f[5];
+    if (tot > 0) {
+      for (const f of D.na) {
+        if (f[4] !== par) continue;
+        filas.push([f[0], f[1], f[2], f[3], nivel * f[5] / tot]);
+      }
+    }
+  }
+  E.cacheNc.set(ck, filas);
+  return filas;
+}
+
 function mezclaCiclo(E, is, ic, im, par, tope) {
   const ck = is + ',' + ic + ',' + im + ',' + par + ',' + (tope || 0);
   const hit = E.cacheNc.get(ck); if (hit) return hit;
@@ -713,6 +738,24 @@ function proyectar(E, stock0, nuevos, periodos, shock, conVar) {
           dvar.set(k2, (dvar.get(k2) || 0)
             + cant * mz[ti] * (1 - mz[ti]) + cant * cant * mz[ti] * (1 - mz[ti]) / nm);
         }
+      }
+    });
+
+    /* ---- reingresos por NUEVA ADMISIÓN ----
+       Ni son ingresantes declarados —no vienen en el archivo— ni salen del
+       stock observado, porque su matrícula anterior es anterior a la ventana.
+       El modelo los genera como nivel por paridad, repartido con la
+       composición histórica de la categoría y con el turno del estimador de
+       ingresantes, que sí sale del histórico. */
+    nuevaAdmision(E, par).forEach(([is, ic, im, ciclo0, cant]) => {
+      if (cant <= 0) return;
+      const ciclo = Math.min(ciclo0, planPorIc[ic] || D.planDefecto, topeMaduracion[is]);
+      const [mz] = mezclaNuevos(E, is, ic, im, ciclo, par);
+      for (let ti = 0; ti < NT; ti++) {
+        if (mz[ti] <= 0) continue;
+        const k2 = is + '|' + ic + '|' + im + '|4|' + ciclo + '|' + ti;
+        dest.set(k2, (dest.get(k2) || 0) + cant * mz[ti]);
+        if (conVar) dvar.set(k2, (dvar.get(k2) || 0) + cant * mz[ti]);
       }
     });
     res.set(T, dest);

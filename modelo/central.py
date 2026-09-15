@@ -12,7 +12,7 @@ La distinción entre REGULAR y RECUPERADO no la da el flujo de matrícula sino
 el campo `Condicion`: el estado académico con que el estudiante cerró el
 semestre anterior. Un estudiante que abandonó, se retiró o quedó inhabilitado
 y aun así se matricula al semestre siguiente es un recuperado; el que cerró
-activo es un regular. El salto de ciclo está correlacionado —el 83,4 % de los
+activo es un regular. El salto de ciclo está correlacionado —el 81,8 % de los
 recuperados repite ciclo— pero no es la definición.
 
 La regla, reconstruida y contrastada contra `Tipo_estudiante` con un 99,1 %

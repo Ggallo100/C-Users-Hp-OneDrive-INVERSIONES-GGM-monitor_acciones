@@ -16,34 +16,76 @@ El estado del modelo es
 | Sede | 0 % | Se conserva. |
 | Modalidad | 0,56 % | Se conserva; condiciona las tres probabilidades. |
 | Carrera | 0,43 % | Se conserva. |
-| Continuidad | siempre | La fijan el rezago y el salto de ciclo del flujo; sin parámetros. |
+| Continuidad | siempre | Clasificación oficial de la base central. El rezago fija el reinicio; el reparto regular/recuperado se estima (`r`). |
 | Ciclo | 15,1 % | Matriz de avance estimada. El de ingreso se estima cuando el archivo no lo declara. |
 | Turno | 21,5 % | Matriz de transición estimada. |
 
-La **continuidad de la matrícula** distingue tres condiciones de continuador. El
-*regular* se matricula el semestre inmediato y cambia de ciclo. El *recuperado*
-también se matricula el semestre inmediato, pero vuelve al **mismo ciclo**:
-perdió el que cursaba —figura como desertor de ese ciclo— y lo retoma. El
-*reiniciado* interrumpió uno o más semestres y volvió. El *ingresante* ocupa la
-dimensión sólo en su primer semestre. No se declara en ningún sitio ni necesita
-matriz de transición: la determinan el rezago y el salto de ciclo del propio
-flujo (L ≥ 2 reiniciado; L = 1 con Δ = 0 recuperado; L = 1 con Δ ≠ 0 regular), de
-modo que el desglose de las tablas de resultados sale de la recursión y suma
-exactamente el total.
+La **continuidad de la matrícula** es la clasificación oficial de la
+universidad, tomada del campo `Condicion` de su base central
+(`BD_GENERAL_CONSOLIDADO.xlsx`), que registra con qué estado académico cerró el
+estudiante el semestre anterior. Son cinco:
 
-Es el factor de mayor magnitud del modelo, y separa dos riesgos distintos: el
-reiniciado se cae de la matrícula (continúa el 59,0 % frente al 86,0 % de un
-regular, y la brecha no se cierra en todo el plan), mientras que el recuperado se
-queda pero no avanza (continúa el 70,9 %, pero sólo el 57,4 % cambia de ciclo y
-uno de cada cinco repite otra vez), de modo que se acumula en los ciclos bajos.
+| Condición | Definición | Peso |
+|---|---|---|
+| Ingresante | primera matrícula; lo declara el archivo de entrada | 13–34 % |
+| Regular | cerró el semestre anterior ACTIVO, TERMINÓ MALLA o EGRESADO | 61–83 % |
+| Recuperado | **no** cerró el semestre anterior (abandono, retiro, inhabilitación) y aun así se matricula al siguiente | 0,52–0,85 % |
+| Reinicio | interrumpió uno o más semestres y volvió | 3,2–4,3 % |
+| Ingresante nueva admisión | vuelve de una ausencia larga por esa vía; no sale del archivo de entrada, lo genera el modelo | 0,24–0,45 % |
 
-> **La marca `Desertor` de la base no sirve para esto.** Su regla interna es «no
-> se matriculó el semestre inmediato siguiente» —exacta en los seis semestres
-> cerrados, con cero excepciones— y por construcción excluye a quien sí se
-> matriculó, que es justo el recuperado. Además está congelada a una fecha
-> anterior a la campaña de 2026-II, lo que marca como desertores al 65,5 % de
-> 2026-I y al 0 % de 2026-II. La condición se deriva del panel de matrículas.
-> Ver `descriptivos.py`.
+`central.py` reconstruye esa regla y coincide con el campo `Tipo_estudiante`
+oficial en el **99,63 %** de 97 162 matrículas. La regla es:
+
+    brecha ≥ 2 semestres            -> Reinicio (o Ingresante nueva admisión)
+    brecha 1 y cierre anterior ACTIVO  -> Regular
+    brecha 1 y cierre anterior no ACTIVO -> Recuperado
+    sin matrícula previa             -> Ingresante
+
+> **El histórico de matriculados no permite reproducirla.** No trae el campo
+> `Condicion`, y sin él regular y recuperado no se distinguen. El salto de ciclo
+> **no** sirve como sustituto: el 81,8 % de los recuperados repite ciclo, pero
+> sólo el 8,1 % de quienes repiten ciclo son recuperados, de modo que esa regla
+> da una categoría diez veces mayor que la real. Por eso la continuación, el
+> avance y `r` se estiman sobre el panel de la base central, realineado al índice
+> de periodos del histórico y truncado en el mismo corte durante el backtesting.
+> El turno sigue saliendo del histórico, con la aproximación de tres condiciones
+> que sí es derivable de él (`estimar.condicion_de`).
+
+`r = P(recuperado | rezago 1)` es el **único parámetro nuevo** que exige la
+clasificación oficial: 0,83 % global, contraído en cascada
+`global → ciclo → condición×ciclo → modalidad×condición×ciclo → carrera` con
+k = 27,4. La condición de origen es el nivel que más informa: quien llega como
+recuperado vuelve a serlo el 21,2 % de las veces frente al 0,6 % de un regular.
+
+Comportamiento comparado (panel de la base central, orígenes con destino
+observable):
+
+| Condición | n | Continúa | Avanza | Repite |
+|---|---|---|---|---|
+| Regular | 56 040 | 85,5 % | 89,2 % | 8,7 % |
+| Ingr. nueva admisión | 260 | 72,7 % | 90,0 % | 6,4 % |
+| Recuperado | 489 | 63,8 % | 61,2 % | 36,5 % |
+| Reinicio | 2 658 | 61,2 % | 79,3 % | 15,0 % |
+| Ingresante | 16 328 | 60,7 % | 95,3 % | 4,6 % |
+
+> **Dos semestres de la base central no son utilizables.** En 2023-I todos los
+> continuadores figuran como «Reinicio» (7 855) porque es el primer semestre
+> cargado; en 2026-II sólo hay 708 filas porque la extracción es del 18 de junio
+> de 2026. Los ciclos de verano tampoco. Quedan seis semestres y 97 162
+> matrículas, frente a los ocho del histórico.
+
+> **La marca `Desertor` tampoco sirve.** Su regla interna es «no se matriculó el
+> semestre inmediato siguiente» —exacta en los seis semestres cerrados, con cero
+> excepciones— y por construcción excluye a quien sí se matriculó, que es justo
+> el recuperado. Además está congelada a una fecha anterior a la campaña de
+> 2026-II. Ver `descriptivos.py`.
+
+> **El backtesting se mide contra objetivos cerrados.** El último semestre del
+> histórico sigue admitiendo altas, así que como objetivo está censurado por
+> abajo y premia a cualquier especificación que proyecte de menos. `rejilla.py` y
+> `ablacion.py` informan las dos series y seleccionan sobre la cerrada. Con ella:
+> EPAP del total 1,04 %, sesgo −10; con el semestre parcial dentro, 1,51 % y
+> +199.
 
 ## Cuándo hace falta regenerar
 
@@ -107,14 +149,16 @@ por defecto del control del HTML no hace falta tocarlo: la interfaz lo lee de
 | `fase2.py` | Calibra el factor de inflación de varianza κ contra la cobertura observada y escribe `parametros.json`. |
 | `compactar.py` | Empaqueta los conteos de transición por periodo en arreglos indexados (~450 KB) que se incrustan en el HTML, incluida la tabla de oferta `(sede, carrera, modalidad)`. |
 | `construir_html.py` | Ensambla las piezas de `fuente/` con los datos y escribe el HTML final. |
-| `rejilla.py` | Selección de λ por backtesting de origen móvil, con criterio minimax sobre las series indexadas. Escribe `grid_lambda.json`. |
+| `central.py` | Lee la base central de la universidad y reconstruye la clasificación oficial de la condición. Es la autoridad sobre regular / recuperado / reinicio / ingresante nueva admisión, y el panel que produce alimenta la continuación, el avance y `r`. Ejecutado directamente imprime el contraste contra `Tipo_estudiante`. |
+| `rejilla.py` | Selección de λ por backtesting de origen móvil, con criterio minimax sobre las series indexadas, medido sobre los objetivos cerrados. Escribe `grid_lambda.json`. |
 | `cobertura.py` | Cobertura empírica de la banda de escenarios frente a la del intervalo de predicción. Alimenta la tabla del capítulo 7 del documento. |
 | `paridad.py` | Reagrega `compacto.json` con la misma aritmética que el motor JavaScript y escribe `paridad_py.json`, la referencia contra la que se verifica. |
-| `ablacion.py` | Contraste de especificación: ejecuta la canalización completa con y sin una dimensión y compara el error en los niveles comunes. Admite `modalidad` o `condicion` como argumento. |
+| `ablacion.py` | Contraste de especificación: ejecuta la canalización completa con y sin una dimensión y compara el error en los niveles comunes, con y sin el semestre parcial como objetivo. Admite `modalidad` o `condicion` como argumento. |
 | `preparar_prueba.py` | Genera los dos archivos de ingresantes de prueba, con y sin columna de modalidad. |
 | `repartir_ingresantes.py` | Reparte un total de ingresantes por semestre, sede, carrera y modalidad entre los ciclos donde el histórico registra convalidaciones. Excel de entrada sin columna Ciclo, Excel de salida con ella, listo para cargar en el modelo. Sin argumentos escribe sólo el cuadro de tasas aplicadas. |
-| `tablas_condicion.py` | Genera `../tablas_continuadores.xlsx`: la matrícula clasificada por condición de llegada a lo largo de todos los semestres, abierta por carrera, por modalidad y por ciclo, más una hoja de detalle en formato largo para tablas dinámicas. |
-| `descriptivos.py` | Recalcula las cifras descriptivas que citan los capítulos 1, 4 y 5 del documento (composición por condición, retención y avance de cada una, decaimiento de la cicatriz, permanencia de turno). No forma parte de la estimación: evita tener que rehacerlas a mano al actualizar la base. |
+| `tablas_condicion.py` | Genera `../tablas_continuadores.xlsx`: la matrícula clasificada por la condición **oficial** de la base central a lo largo de los seis semestres utilizables, abierta por carrera, por modalidad y por ciclo, más una hoja de detalle en formato largo para tablas dinámicas. |
+| `cifras_documento.py` | Recalcula todas las cifras de la clasificación oficial que cita el documento: composición por condición y semestre, contraste con `Tipo_estudiante`, comportamiento y reincidencia de cada condición, `r` por ciclo y modalidad, anexos A.1, A.3 y A.6, y el flujo de nueva admisión. Escribe `cifras_documento.txt`. |
+| `descriptivos.py` | Recalcula las cifras descriptivas del **histórico** que citan los capítulos 1, 4 y 5 (cobertura, composición por modalidad, rezagos, turno, ciclo terminal, la marca `Desertor`). Lo que llame «condición» es la aproximación de tres categorías, no la oficial: para esa usar `cifras_documento.py`. |
 
 ## Verificación
 

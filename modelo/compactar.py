@@ -43,20 +43,35 @@ def compactar():
     iT = {v: i for i, v in enumerate(turnos)}
     iD = {v: i for i, v in enumerate(CONDICIONES)}
 
-    # ---- continuación: [is, ic, im, id, ciclo, par, ip, n0..n3, k0..k3] ---
+    # ---- continuación y avance: desde la BASE CENTRAL --------------------
+    # Estas dos tablas llevan la condición en la clave, y la condición oficial
+    # sólo la tiene la base central: el histórico de matriculados no trae el
+    # campo `Condicion` y por tanto no sabe separar al regular del recuperado.
+    # Si se estimaran sobre el histórico, el estado «Recuperado» heredaría la
+    # tasa media de su ciclo —un 88,5 %— en vez de la suya, que es del 63,8 %.
+    # El turno se queda en el histórico porque el de la central es inservible:
+    # falta en el 46 % de las filas y su distribución está invertida.
+    bc = _panel_central().copy()
+    bc["ip"] = bc["Periodo_real"].map(idx)
+    bc = bc[bc["ip"].notna()]
+    bc["ip"] = bc["ip"].astype(int)
+    # Último periodo que la base central observa: más allá no puede decir si
+    # alguien continuó, así que ahí termina el conjunto de riesgo.
+    ipmax = int(bc["ip"].max())
+
     cont = {}
-    tt = b["t"].values.astype(int)
-    rz = b["rezago"].values
-    sv, cv = b["Sede"].values, b["Carrera"].values
-    mv = b["Modalidad_estudios"].values
-    dv = b["condicion"].values
-    civ = b["Ciclo"].values.astype(int)
-    pv = b["par"].values.astype(int)
-    for i in range(len(b)):
+    tt = bc["ip"].values.astype(int)
+    rz = bc["rezago"].values
+    sv, cv = bc["Sede"].values, bc["Carrera"].values
+    mv = bc["Modalidad_estudios"].values
+    dv = bc["condicion"].values
+    civ = bc["Ciclo"].values.astype(int)
+    pv = bc["par"].values.astype(int)
+    for i in range(len(bc)):
         key = (iS[sv[i]], iC[cv[i]], iM[mv[i]], iD[dv[i]], civ[i], pv[i], tt[i])
         f = cont.setdefault(key, [0] * (2 * LAG_MAX))
         for L in range(1, LAG_MAX + 1):
-            if tt[i] + L <= nper - 1:
+            if tt[i] + L <= ipmax:
                 f[L - 1] += 1                       # en riesgo del rezago L
         if not np.isnan(rz[i]):
             L = int(rz[i])
@@ -65,14 +80,19 @@ def compactar():
     filas_cont = [list(k) + v for k, v in sorted(cont.items())]
 
     # ---- avance de ciclo: [ic, im, id, ciclo, ip, d(-1..3)] ---------------
-    r = b[b["tSig"].notna()].copy()
-    r["delta"] = (r["cicloSig"] - r["Ciclo"]).map(clasifica_delta)
-    av = (r.groupby(["Carrera", "Modalidad_estudios", "condicion", "Ciclo", "t",
-                     "delta"]).size()
+    rc = bc[bc["tSig"].notna()].copy()
+    rc["delta"] = (rc["cicloSig"] - rc["Ciclo"]).map(clasifica_delta)
+    av = (rc.groupby(["Carrera", "Modalidad_estudios", "condicion", "Ciclo", "ip",
+                      "delta"]).size()
           .unstack("delta", fill_value=0).reindex(columns=DELTAS, fill_value=0))
     filas_av = [[iC[c], iM[m], iD[d], int(ci), int(t)] +
                 [int(x) for x in av.loc[(c, m, d, ci, t)].values]
                 for (c, m, d, ci, t) in av.index]
+
+    # El turno sigue saliendo del histórico, cuyas condiciones son las tres
+    # derivables; el motor resuelve las que falten subiendo en la cascada.
+    r = b[b["tSig"].notna()].copy()
+    r["delta"] = (r["cicloSig"] - r["Ciclo"]).map(clasifica_delta)
 
     # ---- turno: [is, im, id, ciclo, it, ip, destino...] -------------------
     tu = (r.groupby(["Sede", "Modalidad_estudios", "condicion", "Ciclo", "Turno", "t",
@@ -110,6 +130,23 @@ def compactar():
     filas_nc = [[iS[s], iC[c], iM[m], int(pa), int(t)] +
                 [int(x) for x in nc.loc[(s, c, m, pa, t)].values]
                 for (s, c, m, pa, t) in nc.index]
+
+    # ---- nueva admisión: [is, ic, im, ciclo, par, n] ----------------------
+    # Reingresos por NUEVA ADMISIÓN tras una ausencia larga. No son ingresantes
+    # declarados —no vienen en el archivo de entrada— ni salen del stock
+    # observado, porque su matrícula anterior es anterior a la ventana. El
+    # modelo tiene que generarlos, y lo hace como NIVEL por paridad: unos 68
+    # en los primeros semestres y 45 en los segundos. Se proyecta el nivel y no
+    # una cuota porque es lo más estable de las tres alternativas medidas
+    # (coeficiente de variación del 15 % frente al 16 % y el 23 % de las
+    # cuotas sobre matrícula y sobre continuadores).
+    na = bc[bc["condicion"] == "Ingresante nueva admisión"]
+    gna = na.groupby(["Sede", "Carrera", "Modalidad_estudios", "Ciclo", "par"]).size()
+    filas_na = [[iS[s_], iC[c], iM[m], int(ci), int(pa), int(v)]
+                for (s_, c, m, ci, pa), v in gna.items()]
+    nsem = na.groupby("par")["Periodo_real"].nunique()
+    na_nivel = {str(int(pa)): round(float(v) / max(int(nsem.get(pa, 1)), 1), 4)
+                for pa, v in na.groupby("par").size().items()}
 
     # ---- stock y nuevos observados ---------------------------------------
     st = stock_observado(b)
@@ -161,6 +198,7 @@ def compactar():
         "sedeApertura": apertura, "oferta": oferta,
         "cont": filas_cont, "av": filas_av, "tu": filas_tu,
         "nt": filas_nt, "nm": filas_nm, "nc": filas_nc,
+        "na": filas_na, "naNivel": na_nivel,
         "stock": filas_st, "nuevos": filas_nu,
         "varianza": varianza_proceso(b, nper),
         "meta": {
@@ -187,7 +225,8 @@ if __name__ == "__main__":
     d = compactar()
     js = json.dumps(limpia(d), ensure_ascii=False, separators=(",", ":"))
     open("compacto.json", "w", encoding="utf-8").write(js)
-    print("Filas: cont=%d av=%d tu=%d nt=%d nm=%d nc=%d stock=%d nuevos=%d oferta=%d" %
+    print("Filas: cont=%d av=%d tu=%d nt=%d nm=%d nc=%d na=%d stock=%d nuevos=%d oferta=%d" %
           (len(d["cont"]), len(d["av"]), len(d["tu"]), len(d["nt"]), len(d["nm"]),
-           len(d["nc"]), len(d["stock"]), len(d["nuevos"]), len(d["oferta"])))
+           len(d["nc"]), len(d["na"]), len(d["stock"]), len(d["nuevos"]), len(d["oferta"])))
+    print("nueva admisión por paridad: %s" % d["naNivel"])
     print("compacto.json: %.1f KB" % (len(js.encode()) / 1024))

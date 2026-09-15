@@ -11,3 +11,4 @@ node_modules/
 modelo/ablacion_*.txt
 modelo/descriptivos.txt
 modelo/central.pkl
+modelo/cifras_documento.txt

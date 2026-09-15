@@ -26,8 +26,8 @@ async function exportarExcel() {
     ['Choque sistémico de los escenarios', '±' + nf2.format(P.z * P.sigma) + ' en logit (z=' +
       nf2.format(P.z) + ' · σ=' + nf2.format(P.sigma) + ')'],
     [],
-    ['Semestre', 'Ingresantes', 'Cont. regulares', 'Cont. reiniciados',
-      'Cont. recuperados', 'Continuadores', 'Pesimista', 'Moderado', 'Optimista',
+    ['Semestre', 'Ingresantes', 'Cont. regulares', 'Cont. recuperados',
+      'Cont. reinicio', 'Ingr. nueva admisión', 'Continuadores', 'Pesimista', 'Moderado', 'Optimista',
       'IP inferior', 'IP superior', 'Variación vs. anterior'].map(H),
   ];
   let prev = S.D.stock.filter(x => x[0] === S.D.periodos.length - 1).reduce((s, x) => s + x[7], 0);
@@ -36,8 +36,13 @@ async function exportarExcel() {
     const sd = Math.sqrt(sumaMapa(P.varz.get(T)));
     const hw = P.z * Math.sqrt(Math.pow((a - b) / 2 / P.z, 2) + sd * sd);
     const d = porCondicion(P.cen.get(T));
-    r1.push([rotuloPeriodo(T), N0(d[0]), N0(d[1]), N0(d[2]), N0(d[3]), N0(c - d[0]),
-    N0(b), N0(c), N0(a), N0(c - hw), N0(c + hw), PC(c / Math.max(prev, 1) - 1)]);
+    /* El orden de las columnas es el de `S.D.condiciones`: ingresante,
+       regular, recuperado, reinicio y nueva admisión. Los continuadores son
+       todo lo que no es ingresante de primera matrícula, de modo que la nueva
+       admisión cuenta dentro de ellos: es un reingreso, no un alumno nuevo. */
+    r1.push([rotuloPeriodo(T), N0(d[0]), N0(d[1]), N0(d[2]), N0(d[3]), N0(d[4]),
+    N0(c - d[0]), N0(b), N0(c), N0(a), N0(c - hw), N0(c + hw),
+    PC(c / Math.max(prev, 1) - 1)]);
     prev = c;
   });
 

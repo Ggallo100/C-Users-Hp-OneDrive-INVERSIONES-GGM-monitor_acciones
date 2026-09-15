@@ -43,6 +43,15 @@ SERIES = {
 }
 
 
+# El último semestre del histórico sigue admitiendo altas en la fecha de
+# extracción. Como OBJETIVO del backtesting está censurado: cualquier ajuste
+# que proyecte de menos parecerá acertar más, y λ es justamente la palanca que
+# baja el nivel proyectado. Seleccionar λ contra un objetivo censurado sesgaría
+# la elección hacia el olvido, así que el criterio se calcula sobre los
+# objetivos cerrados y la serie completa se informa al lado.
+PARCIAL = 202602
+
+
 def main():
     df = E.cargar()
     b, per, idx = E.panel(df)
@@ -51,13 +60,18 @@ def main():
     filas = []
     for lam in REJILLA:
         bt = E.backtest(b, per, stock, nuevos, lam, LAM_N)
+        cer = bt[bt.periodo != PARCIAL]
         f = {"lam": lam}
         for corto, nivel in SERIES.items():
-            f[corto] = float(bt[bt.nivel == nivel]["epap"].mean())
-        f["sesgo"] = float(bt[bt.nivel == "Total"]["sesgo"].mean())
+            f[corto] = float(cer[cer.nivel == nivel]["epap"].mean())
+            f[corto + "_todo"] = float(bt[bt.nivel == nivel]["epap"].mean())
+        f["sesgo"] = float(cer[cer.nivel == "Total"]["sesgo"].mean())
+        f["sesgo_todo"] = float(bt[bt.nivel == "Total"]["sesgo"].mean())
         filas.append(f)
         print("λ=%.2f  " % lam + "  ".join("%s %.3f%%" % (c, f[c] * 100) for c in SERIES)
-              + "  sesgo %+.0f" % f["sesgo"], flush=True)
+              + "  sesgo %+.0f" % f["sesgo"]
+              + "   | con parcial: total %.3f%% sesgo %+.0f"
+                % (f["total_todo"] * 100, f["sesgo_todo"]), flush=True)
 
     r = pd.DataFrame(filas).set_index("lam")
     ind = r[list(SERIES)] / r[list(SERIES)].min()
@@ -66,7 +80,9 @@ def main():
     lam_sel = float(r["peor"].idxmin())
     lam_media = float(r["media"].idxmin())
 
-    print("\n=== series indexadas (100 = mejor λ de ese nivel) ===")
+    print("\n=== EPAP con TODOS los objetivos, incluido el semestre parcial ===")
+    print((r[[c + "_todo" for c in SERIES]] * 100).round(3).to_string())
+    print("\n=== series indexadas sobre objetivos CERRADOS (100 = mejor λ de ese nivel) ===")
     print((ind * 100).round(2).to_string())
     print("\n=== criterios ===")
     print(pd.DataFrame({"peor nivel": (r["peor"] * 100).round(2),

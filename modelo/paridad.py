@@ -72,6 +72,24 @@ for f in D['nm']:
     for i in range(NM): nmg[i]+=f[5+i]*w
 
 def nk(d): return {k:{'n':v[:LAG_MAX],'k':v[LAG_MAX:]} for k,v in d.items()}
+
+def na_por_indice(filas,nivel):
+    if not filas: return {}
+    comp={}
+    for is_,ic,im,ci,pa,n in filas:
+        comp.setdefault(str(pa),{})['%d|%d|%d|%d'%(is_,ic,im,ci)]=n
+    return {'nivel':nivel or {}, 'comp':comp}
+
+def rec_por_indice(R,iC,iM):
+    """Traduce las claves de la tabla de recuperados de nombre a índice."""
+    if not R: return R
+    out={'global':R['global'],'k_rec':R['k_rec'],'ciclo':R['ciclo'],
+         'cond_ciclo':R['cond_ciclo'],'moda_cond_ciclo':{},'celda':{}}
+    for k,v in R['moda_cond_ciclo'].items():
+        m,ci,cl=k.split('|'); out['moda_cond_ciclo']['%d|%s|%s'%(iM[m],ci,cl)]=v
+    for k,v in R['celda'].items():
+        c,m,ci,cl=k.split('|'); out['celda']['%d|%d|%s|%s'%(iC[c],iM[m],ci,cl)]=v
+    return out
 iS={v:i for i,v in enumerate(D['sedes'])}; iC={v:i for i,v in enumerate(D['carreras'])}
 iM={v:i for i,v in enumerate(D['modalidades'])}
 par={'periodos':D['periodos'],'turnos':list(range(NT)),'sedes':D['sedes'],
@@ -86,9 +104,13 @@ par={'periodos':D['periodos'],'turnos':list(range(NT)),'sedes':D['sedes'],
  'k_cond':ks['cond'],'k_ciclopar':ks['ciclopar'],'k_ciclo':ks['ciclo'],
  # el arnés indexa las condiciones igual que compacto.json, por posición
  'condiciones':[str(i) for i in range(NC)],
- # r = P(Recuperado | rezago 1) tal cual viene del payload: el motor JS lee la
- # misma tabla, así que la paridad comprueba también esta cascada.
- 'recuperado':D.get('rec'),
+ # r = P(Recuperado | rezago 1). El payload la indexa por NOMBRE de carrera y
+ # modalidad, igual que el resto de tablas del modelo; este arnés trabaja con
+ # índices, así que hay que traducir las claves antes de pasarla.
+ 'recuperado':rec_por_indice(D.get('rec'),iC,iM),
+ # nueva admisión: el payload la trae como filas indexadas; aquí se rearma con
+ # la misma forma que espera el modelo, con las claves ya en índices.
+ 'nueva_admision':na_por_indice(D.get('na'),D.get('naNivel')),
  'av_celda':avc,'av_moda':avm,'av_cond':avd,'av_ciclo':avci,'av_global':avg,
  'k_avance':k_dirichlet(np.array(list(avc.values())))*FK,
  'tu_celda':tuc,'tu_cond':tud,'tu_moda':tum,'tu_sede':tus,
