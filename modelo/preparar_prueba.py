@@ -3,9 +3,12 @@
 """
 Genera los dos archivos de ingresantes de prueba en `fuente/descargas/`:
 
-  ingresantes_prueba.xlsx          con la columna Modalidad
-  ingresantes_sin_modalidad.xlsx   sin ella, para comprobar la compatibilidad
-                                   con la plantilla anterior
+  ingresantes_prueba.xlsx          con las columnas Modalidad y Ciclo
+  ingresantes_sin_modalidad.xlsx   sin Modalidad, para comprobar la
+                                   compatibilidad con la plantilla anterior
+  ingresantes_sin_ciclo.xlsx       sin Ciclo: el modelo lo reparte entre los
+                                   ciclos donde el histórico registra
+                                   convalidaciones
 
 La base es el último ingreso observado de cada paridad, tomado de
 `compacto.json`, proyectado a los cuatro semestres siguientes. Sobre esa base se
@@ -70,16 +73,35 @@ def casos_limite(futuros):
     return ia + este
 
 
-def escribe(ruta, filas, con_modalidad):
+def escribe(ruta, filas, con_modalidad=True, con_ciclo=True):
+    """Escribe el Excel omitiendo las columnas opcionales que se indiquen."""
+    quitar = set()
+    if not con_modalidad:
+        quitar.add("Modalidad")
+    if not con_ciclo:
+        quitar.add("Ciclo")
+    cab = [c for c in CAB if c not in quitar]
+    ix = [CAB.index(c) for c in cab]
     w = openpyxl.Workbook()
     s = w.active
     s.title = "Ingresantes"
-    cab = CAB if con_modalidad else [c for c in CAB if c != "Modalidad"]
     s.append(cab)
-    for f in filas:
-        s.append(f if con_modalidad else [f[0], f[1], f[2], f[4], f[5], f[6]])
+    if con_ciclo:
+        for f in filas:
+            s.append([f[i] for i in ix])
+    else:
+        # Sin ciclo hay que agregar: varias filas de la misma combinación se
+        # funden en un único total, que es como llegaría un archivo real.
+        tot = {}
+        for f in filas:
+            k = tuple(f[i] for i in ix if CAB[i] != "Nuevos")
+            tot[k] = tot.get(k, 0) + f[CAB.index("Nuevos")]
+        jn = [c for c in cab if c != "Nuevos"]
+        for k, v in tot.items():
+            fila = dict(zip(jn, k))
+            s.append([fila.get(c, v if c == "Nuevos" else None) for c in cab])
     w.save(ruta)
-    print("%s -> %d filas, %d columnas" % (ruta, len(filas), len(cab)))
+    print("%s -> %d filas, %d columnas" % (ruta, s.max_row - 1, len(cab)))
 
 
 def main():
@@ -87,8 +109,11 @@ def main():
     D = json.load(open(os.path.join(AQUI, "compacto.json"), encoding="utf-8"))
     futuros = [mover(D["periodos"][-1], i) for i in range(1, 5)]
     filas = base(D, futuros) + casos_limite(futuros)
-    escribe(os.path.join(SALIDA, "ingresantes_prueba.xlsx"), filas, True)
-    escribe(os.path.join(SALIDA, "ingresantes_sin_modalidad.xlsx"), filas, False)
+    escribe(os.path.join(SALIDA, "ingresantes_prueba.xlsx"), filas)
+    escribe(os.path.join(SALIDA, "ingresantes_sin_modalidad.xlsx"), filas,
+            con_modalidad=False)
+    escribe(os.path.join(SALIDA, "ingresantes_sin_ciclo.xlsx"), filas,
+            con_ciclo=False)
 
 
 if __name__ == "__main__":

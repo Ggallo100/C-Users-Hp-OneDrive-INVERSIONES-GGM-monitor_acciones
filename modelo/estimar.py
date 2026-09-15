@@ -247,6 +247,28 @@ def tabla_nuevos_modalidad(b, modalidades, nper, lam_n):
             .reindex(columns=modalidades, fill_value=0.0))
 
 
+def tabla_nuevos_ciclo(b, nper, lam_n):
+    """
+    Reparto de los ingresantes por CICLO de ingreso. Sólo se usa cuando el
+    archivo de entrada no declara el ciclo.
+
+    El 96,2 % entra en el primero, pero el resto no es ruido: son
+    convalidaciones de estudios previos, y su volumen depende con fuerza de la
+    carrera —de un 0,2 % en Obstetricia a un 19,7 % en Contabilidad— y de la
+    modalidad. La edad media lo confirma: 26,2 años en el ciclo 1 frente a
+    34,0 en el 4.
+
+    Se devuelve la tabla cruda; la separación en nivel y forma la hace
+    `construir_parametros`, porque las dos partes necesitan contracciones
+    distintas.
+    """
+    n = b[b["esNuevo"] == 1].copy()
+    n["w"] = pesos(n, nper - 1, lam_n)
+    n["Ciclo"] = n["Ciclo"].astype(int).clip(1, b["Ciclo"].astype(int).max())
+    return (n.groupby(["Sede", "Carrera", "Modalidad_estudios", "par", "Ciclo"])["w"].sum()
+            .unstack("Ciclo", fill_value=0.0).sort_index(axis=1))
+
+
 # =============================================================================
 # 6. Descomposición de varianza
 # =============================================================================
@@ -454,6 +476,61 @@ def construir_parametros(b, per, hasta=None, lam=0.50, lam_n=0.30):
     m3 = nm.groupby(level=["Sede", "par"]).sum()
     m4 = nm.groupby(level=["Sede"]).sum()
 
+    # --- mezcla de ciclo de ingreso ----------------------------------------
+    # Dos partes, porque los datos dicen cosas distintas de cada una:
+    #   NIVEL  cuántos entran por encima del ciclo 1. Varía muchísimo por
+    #          carrera y por modalidad, y también por paridad del semestre:
+    #          el recuento de convalidaciones es estable mientras que la
+    #          campaña de ciclo 1 se duplica en los primeros semestres, de
+    #          modo que la CUOTA sube en los segundos. Beta-Binomial.
+    #   FORMA  a qué ciclo llegan los que entran alto. Es casi universal
+    #          —57 % al ciclo 2, 21 % al 3, 13 % al 4, 9 % al 5 o más— así
+    #          que basta una cascada corta. Dirichlet-Multinomial.
+    nc = tabla_nuevos_ciclo(bb, nper, lam_n)
+    cic_cols = list(nc.columns)
+    alto_cols = [c for c in cic_cols if c != 1]
+
+    def nivel_alto(df):
+        """exitos = entra por encima del ciclo 1; ensayos = todos."""
+        n = df.sum(axis=1)
+        k = df[alto_cols].sum(axis=1) if alto_cols else n * 0
+        return {"n": float(n.sum()) if hasattr(n, "sum") else float(n),
+                "k": float(k.sum()) if hasattr(k, "sum") else float(k)}
+
+    def dic_nivel(g):
+        out = {}
+        for idx, fila in g.iterrows():
+            clave = "|".join(str(x) for x in (idx if isinstance(idx, tuple) else (idx,)))
+            tot = float(fila.sum())
+            alt = float(fila[alto_cols].sum()) if alto_cols else 0.0
+            if tot > 0:
+                out[clave] = {"n": round(tot, 4), "k": round(alt, 4)}
+        return out
+
+    def dic_forma(g):
+        out = {}
+        for idx, fila in g.iterrows():
+            clave = "|".join(str(x) for x in (idx if isinstance(idx, tuple) else (idx,)))
+            v = fila[alto_cols].values.astype(float)
+            if v.sum() > 0:
+                out[clave] = R4(v)
+        return out
+
+    nc_par = nc.groupby(level=["par"]).sum()
+    nc_moda_par = nc.groupby(level=["Modalidad_estudios", "par"]).sum()
+    nc_carr_par = nc.groupby(level=["Carrera", "par"]).sum()
+    nc_cm_par = nc.groupby(level=["Carrera", "Modalidad_estudios", "par"]).sum()
+    nc_moda = nc.groupby(level=["Modalidad_estudios"]).sum()
+    nc_carr = nc.groupby(level=["Carrera"]).sum()
+    nc_cm = nc.groupby(level=["Carrera", "Modalidad_estudios"]).sum()
+    glob_n = float(nc.values.sum())
+    glob_k = float(nc[alto_cols].values.sum()) if alto_cols else 0.0
+    k_nivel = k_betabinom([v["k"] for v in dic_nivel(nc_cm_par).values()],
+                          [v["n"] for v in dic_nivel(nc_cm_par).values()])
+    forma_celda = dic_forma(nc)
+    k_forma = (k_dirichlet(np.array(list(forma_celda.values()), float))
+               if forma_celda else 50.0)
+
     # --- longitud de plan --------------------------------------------------
     # Un ciclo con continuación alta implica que el plan sigue más allá; el
     # último ciclo con continuación alta + 1 es el ciclo terminal. Las carreras
@@ -524,6 +601,21 @@ def construir_parametros(b, per, hasta=None, lam=0.50, lam_n=0.30):
         "nm_sede": {f"{s}": R4(m4.loc[s].values) for s in m4.index},
         "nm_global": R4(nm.sum().values),
         "k_modalidad": k_dirichlet(np.array(list(nm_celda.values()), float)),
+        "ciclosNuevos": [int(c) for c in cic_cols],
+        "nc_nivel_celda": dic_nivel(nc.groupby(
+            level=["Sede", "Carrera", "Modalidad_estudios", "par"]).sum()),
+        "nc_nivel_cm_par": dic_nivel(nc_cm_par),
+        "nc_nivel_carr_par": dic_nivel(nc_carr_par),
+        "nc_nivel_moda_par": dic_nivel(nc_moda_par),
+        "nc_nivel_par": dic_nivel(nc_par),
+        "nc_nivel_global": {"n": round(glob_n, 4), "k": round(glob_k, 4)},
+        "k_nivelCiclo": float(k_nivel),
+        "nc_forma_celda": forma_celda,
+        "nc_forma_cm": dic_forma(nc_cm),
+        "nc_forma_carr": dic_forma(nc_carr),
+        "nc_forma_moda": dic_forma(nc_moda),
+        "nc_forma_global": R4(nc[alto_cols].sum().values) if alto_cols else [],
+        "k_formaCiclo": float(k_forma),
     }
 
 
@@ -701,6 +793,85 @@ class Modelo:
             ("sede·carrera·paridad", p["nm_carrera_par"].get(f"{sede}|{carrera}|{parid}")),
             ("celda", p["nm_celda"].get(f"{sede}|{carrera}|{cl}|{parid}")),
         ], p["nm_global"], k)
+
+    def mezcla_ciclo(self, sede, carrera, moda, parid, tope=None):
+        """
+        Reparto estimado de los ingresantes por ciclo de ingreso, para cuando
+        el archivo de entrada no lo declara.
+
+        Devuelve (vector sobre los ciclos 1..N, tamaño efectivo del nivel,
+        nombre del nivel de la cascada que aportó la última evidencia).
+
+        Se estima en dos partes porque los datos se comportan distinto:
+
+          NIVEL  P(entra por encima del ciclo 1). Cascada Beta-Binomial
+                 global → paridad → modalidad·paridad → carrera·paridad →
+                 carrera·modalidad·paridad → sede·carrera·modalidad·paridad.
+                 La paridad entra pronto y no por capricho: la cuota de
+                 convalidaciones es del 2,5 % al 2,7 % en los primeros
+                 semestres y del 4,9 % al 5,9 % en los segundos, porque lo
+                 que cambia es el denominador —la campaña de ciclo 1— y no
+                 el número de convalidados.
+
+          FORMA  P(ciclo | entra alto). Cascada Dirichlet global → modalidad
+                 → carrera → carrera·modalidad. Es corta a propósito: el
+                 reparto apenas varía entre carreras ni entre modalidades.
+
+        `tope` recorta el ciclo máximo admisible —el terminal del plan o el
+        de maduración de la sede— y renormaliza, de modo que nunca se coloca
+        un ingresante en un ciclo que no existe todavía.
+        """
+        p = self.p
+        ciclos = p["ciclosNuevos"]
+        altos = [c for c in ciclos if c != 1]
+        if not altos:
+            return np.array([1.0]), 1.0, "global"
+
+        # --- nivel ---
+        k = p["k_nivelCiclo"] * self.fk
+        g = p["nc_nivel_global"]
+        est = g["k"] / max(g["n"], 1e-9)
+        nef = 0.0
+        for nombre, celda in (
+            ("paridad", p["nc_nivel_par"].get(f"{parid}")),
+            ("modalidad·paridad", p["nc_nivel_moda_par"].get(f"{moda}|{parid}")),
+            ("carrera·paridad", p["nc_nivel_carr_par"].get(f"{carrera}|{parid}")),
+            ("carrera·modalidad·paridad",
+             p["nc_nivel_cm_par"].get(f"{carrera}|{moda}|{parid}")),
+            ("sede·carrera·modalidad·paridad",
+             p["nc_nivel_celda"].get(f"{sede}|{carrera}|{moda}|{parid}")),
+        ):
+            if celda is None or celda["n"] <= 0:
+                continue
+            est = (celda["k"] + k * est) / (celda["n"] + k)
+            nef = celda["n"] + k
+            nivel = nombre
+        est = min(max(est, 0.0), 1.0)
+
+        # --- forma ---
+        forma, _, niv_forma = self._cascada([
+            ("modalidad", p["nc_forma_moda"].get(f"{moda}")),
+            ("carrera", p["nc_forma_carr"].get(f"{carrera}")),
+            ("carrera·modalidad", p["nc_forma_cm"].get(f"{carrera}|{moda}")),
+            ("celda", p["nc_forma_celda"].get(f"{sede}|{carrera}|{moda}|{parid}")),
+        ], p["nc_forma_global"], p["k_formaCiclo"] * self.fk)
+
+        v = np.zeros(len(ciclos))
+        v[0] = 1.0 - est
+        for j, c in enumerate(altos):
+            v[ciclos.index(c)] = est * forma[j]
+
+        if tope is not None:
+            # Lo que cae por encima del tope se acumula en el propio tope: es
+            # lo que hace la universidad con un traslado a un ciclo que aún no
+            # oferta, y lo mismo que ya hace la matriz de avance.
+            corte = [i for i, c in enumerate(ciclos) if c > tope]
+            if corte:
+                itope = max([i for i, c in enumerate(ciclos) if c <= tope] or [0])
+                v[itope] += v[corte].sum()
+                v[corte] = 0.0
+        sv = v.sum()
+        return (v / sv if sv > 0 else v), max(nef, 1.0), (nivel if nef else "global")
 
     # --- proyección --------------------------------------------------------
     def proyectar(self, stock0, nuevos, periodos, shock=0.0, varianza=False):

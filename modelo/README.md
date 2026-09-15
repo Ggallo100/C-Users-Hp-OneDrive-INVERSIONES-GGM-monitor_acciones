@@ -17,7 +17,7 @@ El estado del modelo es
 | Modalidad | 0,56 % | Se conserva; condiciona las tres probabilidades. |
 | Carrera | 0,43 % | Se conserva. |
 | Continuidad | siempre | La fijan el rezago y el salto de ciclo del flujo; sin parámetros. |
-| Ciclo | 15,1 % | Matriz de avance estimada. |
+| Ciclo | 15,1 % | Matriz de avance estimada. El de ingreso se estima cuando el archivo no lo declara. |
 | Turno | 21,5 % | Matriz de transición estimada. |
 
 La **continuidad de la matrícula** distingue tres condiciones de continuador. El
@@ -112,6 +112,7 @@ por defecto del control del HTML no hace falta tocarlo: la interfaz lo lee de
 | `paridad.py` | Reagrega `compacto.json` con la misma aritmética que el motor JavaScript y escribe `paridad_py.json`, la referencia contra la que se verifica. |
 | `ablacion.py` | Contraste de especificación: ejecuta la canalización completa con y sin una dimensión y compara el error en los niveles comunes. Admite `modalidad` o `condicion` como argumento. |
 | `preparar_prueba.py` | Genera los dos archivos de ingresantes de prueba, con y sin columna de modalidad. |
+| `repartir_ingresantes.py` | Reparte un total de ingresantes por semestre, sede, carrera y modalidad entre los ciclos donde el histórico registra convalidaciones. Excel de entrada sin columna Ciclo, Excel de salida con ella, listo para cargar en el modelo. Sin argumentos escribe sólo el cuadro de tasas aplicadas. |
 | `tablas_condicion.py` | Genera `../tablas_continuadores.xlsx`: la matrícula clasificada por condición de llegada a lo largo de todos los semestres, abierta por carrera, por modalidad y por ciclo, más una hoja de detalle en formato largo para tablas dinámicas. |
 | `descriptivos.py` | Recalcula las cifras descriptivas que citan los capítulos 1, 4 y 5 del documento (composición por condición, retención y avance de cada una, decaimiento de la cicatriz, permanencia de turno). No forma parte de la estimación: evita tener que rehacerlas a mano al actualizar la base. |
 
@@ -135,6 +136,10 @@ la plantilla, carga un archivo de ingresantes y exporta la proyección.
 10: programa nuevo en las tres modalidades y sede nueva con traslados a un ciclo
 que todavía no puede ofertar.
 
+`fuente/probar_sin_ciclo.js` carga el mismo archivo de ingresantes con y sin la
+columna `Ciclo` y comprueba que el reparto estimado conserva el total exacto y
+reproduce el perfil observado.
+
 ```bash
 python3 paridad.py              # referencia de Python para la prueba de paridad
 python3 preparar_prueba.py      # genera los archivos de entrada de prueba
@@ -143,7 +148,30 @@ node prueba_motor.js
 node probar_html.js
 node probar_ciclo.js
 node verificar_casos.js
+node probar_sin_ciclo.js
 ```
+
+## El ciclo de ingreso de los ingresantes
+
+El archivo de entrada puede omitir la columna `Ciclo`. El 96,2 % de los
+ingresantes históricos entra en el primero, pero 1 205 no: son convalidaciones
+de estudios previos, y la edad media lo confirma —26,2 años en el ciclo 1 frente
+a 34,0 en el 4—. El reparto se estima en dos partes, porque los datos se
+comportan distinto en cada una:
+
+| | Qué mide | Cuánto varía | Contracción |
+|---|---|---|---|
+| **Nivel** | P(entra por encima del ciclo 1) | del 0,2 % de Obstetricia al 19,7 % de Contabilidad; χ² = 1 643 con 17 g.l. | Beta-Binomial, cascada global → paridad → modalidad·paridad → carrera·paridad → carrera·modalidad·paridad → celda |
+| **Forma** | P(ciclo \| entra alto) | casi universal: 57 % al 2, 21 % al 3, 13 % al 4, 9 % al 5+ | Dirichlet, cascada global → modalidad → carrera → carrera·modalidad |
+
+La paridad entra en el nivel y no por capricho: la cuota es del 2,5 % al 2,7 % en
+los primeros semestres y del 4,9 % al 5,9 % en los segundos, pero el recuento de
+convalidados es estable (129 a 172 de media) mientras que la campaña de ciclo 1
+se duplica. Lo que cambia es el denominador.
+
+El reparto respeta el ciclo terminal del plan y el tope de maduración de una sede
+nueva, y usa el método del resto mayor para que la suma coincida exactamente con
+el total declarado.
 
 ## El documento Word
 

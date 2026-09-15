@@ -94,12 +94,64 @@ function nuevosReferencia(periodos) {
  * (contracción por niveles, igual que el turno). El reparto se resuelve aquí y
  * no al cargar, de modo que responde a los parámetros de recencia del usuario.
  */
+/* Reparto entero que conserva la suma: parte entera a todos y las unidades
+   que falten a las celdas de mayor resto. Redondear celda a celda no suma el
+   total declarado. */
+function restoMayor(total, pesos) {
+  const n = Math.round(total);
+  const sw = pesos.reduce((a, b) => a + b, 0);
+  const out = new Array(pesos.length).fill(0);
+  if (n <= 0 || sw <= 0) return out;
+  const resto = [];
+  let dados = 0;
+  for (let i = 0; i < pesos.length; i++) {
+    const x = n * pesos[i] / sw;
+    out[i] = Math.floor(x);
+    dados += out[i];
+    resto.push([x - out[i], i]);
+  }
+  resto.sort((a, b) => b[0] - a[0]);
+  for (let j = 0; j < n - dados; j++) out[resto[j][1]]++;
+  return out;
+}
+
+/* Vector de ciclos de ingreso de una fila. Si la modalidad tampoco está
+   declarada se marginaliza sobre su reparto estimado, tomando el ciclo 1 como
+   referencia para esa mezcla: es donde está el 96 % de los ingresantes, de
+   modo que la aproximación es inocua. */
+function cicloDeFila(E, r, T, tope) {
+  if (r.im !== null) return mezclaCiclo(E, r.is, r.ic, r.im, T % 100, tope)[0];
+  const [mz] = mezclaModalidad(E, r.is, r.ic, 1, T % 100);
+  const acc = new Array(E.NCI).fill(0);
+  for (let im = 0; im < mz.length; im++) {
+    if (mz[im] <= 0) continue;
+    const [v] = mezclaCiclo(E, r.is, r.ic, im, T % 100, tope);
+    for (let i = 0; i < acc.length; i++) acc[i] += mz[im] * v[i];
+  }
+  return acc;
+}
+
 function construirNuevos(E, crudo) {
   const out = new Map();
   const detalle = [];
+  const porCiclo = [];
   crudo.forEach((filas, T) => {
     const m = new Map();
+    /* Primero se reparten por ciclo las filas que no lo declaran; el reparto
+       por modalidad opera después sobre el resultado, igual que si el ciclo
+       hubiera venido en el archivo. */
+    const expandidas = [];
     for (const r of filas) {
+      if (r.ciclo !== null) { expandidas.push(r); continue; }
+      const tope = Math.min(S.planPorIc[r.ic], topeCicloSede(r.is, T));
+      const v = cicloDeFila(E, r, T, tope);
+      const n = restoMayor(r.cant, v);
+      for (let c = 0; c < n.length; c++) {
+        if (n[c] > 0) expandidas.push(Object.assign({}, r, { ciclo: c + 1, cant: n[c] }));
+      }
+      porCiclo.push({ T, is: r.is, ic: r.ic, im: r.im, cant: r.cant, reparto: v });
+    }
+    for (const r of expandidas) {
       if (r.im !== null) {
         const k = r.is + '|' + r.ic + '|' + r.im + '|' + r.ciclo;
         m.set(k, (m.get(k) || 0) + r.cant);
@@ -119,6 +171,7 @@ function construirNuevos(E, crudo) {
     out.set(T, m);
   });
   S.repartoModalidad = detalle;
+  S.repartoCiclo = porCiclo;
   return out;
 }
 
@@ -245,7 +298,10 @@ async function cargarArchivo(file) {
     else tabla = await leerXLSX(await file.arrayBuffer());
 
     const col = mapearColumnas(tabla.cabecera);
-    const faltan = ['periodo', 'sede', 'carrera', 'ciclo', 'nuevos'].filter(c => col[c] === undefined);
+    /* El ciclo es opcional. Si el archivo no lo trae —o lo deja en blanco en
+       alguna fila— el modelo reparte esos ingresantes entre los ciclos en que
+       el histórico registra convalidaciones. Ver `mezclaCiclo`. */
+    const faltan = ['periodo', 'sede', 'carrera', 'nuevos'].filter(c => col[c] === undefined);
     if (faltan.length) {
       throw new Error('Faltan columnas obligatorias: ' + faltan.join(', ') +
         '. Descarga la plantilla para ver el formato esperado.');
@@ -258,12 +314,14 @@ async function cargarArchivo(file) {
       const per = leerPeriodo(f[col.periodo]);
       const sede = String(f[col.sede] || '').trim();
       const carrera = String(f[col.carrera] || '').trim().toUpperCase();
-      const ciclo = Math.round(+String(f[col.ciclo]).replace(',', '.'));
+      const crudoCiclo = col.ciclo === undefined ? '' : String(f[col.ciclo] ?? '').trim();
+      const ciclo = crudoCiclo === '' ? null : Math.round(+crudoCiclo.replace(',', '.'));
       const cant = +String(f[col.nuevos]).replace(/\s/g, '').replace(',', '.');
       const plan = col.plan !== undefined ? Math.round(+f[col.plan]) || 0 : 0;
       const modTxt = col.modalidad !== undefined ? f[col.modalidad] : '';
       if (!isFinite(per) || isNaN(per)) { descartadas++; return; }
-      if (!sede || !carrera || !isFinite(ciclo) || ciclo < 1 || !isFinite(cant)) { descartadas++; return; }
+      if (!sede || !carrera || !isFinite(cant)) { descartadas++; return; }
+      if (ciclo !== null && (!isFinite(ciclo) || ciclo < 1)) { descartadas++; return; }
       if (cant <= 0) return;
       const im = leerModalidad(modTxt);
       if (im === undefined) ilegibles.push({ fila: i + 2, txt: String(modTxt).trim() });
@@ -296,7 +354,8 @@ async function cargarArchivo(file) {
       const is = S.iS.get(nom);
       const suyas = filas.filter(r => r.is === is);
       const inicio = Math.min.apply(null, suyas.map(r => r.per));
-      const cicloBase = Math.max.apply(null, suyas.filter(r => r.per === inicio).map(r => r.ciclo));
+      const decl = suyas.filter(r => r.per === inicio && r.ciclo !== null).map(r => r.ciclo);
+      const cicloBase = decl.length ? Math.max.apply(null, decl) : 1;
       S.aperturaPorIs[is] = { inicio, cicloBase, enMaduracion: true, declarada: true };
     });
 
@@ -309,11 +368,25 @@ async function cargarArchivo(file) {
        sedes están en despliegue, una cuota global escondería las últimas
        detrás de las primeras y el aviso perdería su utilidad. */
     const recortes = { plan: 0, sede: 0, porSede: new Map() };
+
+    /* Las filas sin ciclo declarado se marcan y se dejan para el recálculo:
+       igual que con la modalidad, el reparto se resuelve en `construirNuevos`
+       para que responda a los parámetros de recencia que elija el usuario. */
+    const repartidas = filas.filter(r => r.ciclo === null).length;
+    const repartidos = filas.filter(r => r.ciclo === null)
+      .reduce((a, r) => a + r.cant, 0);
+    if (repartidas) avisos.push({
+      t: 'info', m: fmtN(repartidos) + ' ingresante(s) de ' + fmtN(repartidas) +
+        ' fila(s) sin ciclo declarado se reparten entre los ciclos de ingreso ' +
+        'estimados del histórico: la mayoría al ciclo 1 y el resto a los ciclos ' +
+        'donde se registran convalidaciones de estudios previos.'
+    });
+
     for (const r of filas) {
       const topePlan = S.planPorIc[r.ic];
       const topeSed = topeCicloSede(r.is, r.per);
       const tope = Math.min(topePlan, topeSed);
-      if (r.ciclo > tope) {
+      if (r.ciclo !== null && r.ciclo > tope) {
         if (topeSed < topePlan) {
           recortes.sede++;
           const vistas = (recortes.porSede.get(r.is) || 0) + 1;
@@ -389,6 +462,7 @@ async function cargarArchivo(file) {
       conModalidad: col.modalidad !== undefined,
       declaradas: filas.filter(r => r.im !== null).length,
       estimadas: sinModalidad.length,
+      cicloRepartido: repartidos, filasSinCiclo: repartidas,
     };
 
     // El horizonte se ajusta al último semestre presente en el archivo
@@ -445,7 +519,7 @@ async function descargarPlantilla() {
     ['Periodo', 'Obligatoria. Semestre académico: 2027-I, 2027-II (también admite 202701).'],
     ['Sede', 'Obligatoria. Debe coincidir con el catálogo de la hoja «Catálogos» para heredar su patrón de turno.'],
     ['Carrera', 'Obligatoria. Si no figura en el catálogo se trata como PROGRAMA NUEVO.'],
-    ['Ciclo', 'Obligatoria. Ciclo al que ingresa el estudiante (1 en la admisión ordinaria; >1 en traslados y convalidaciones).'],
+    ['Ciclo', 'Recomendada. Ciclo al que ingresa el estudiante: 1 en la admisión ordinaria, mayor que 1 en traslados y convalidaciones. Si se omite la columna o la celda, el modelo reparte esa fila entre los ciclos donde el histórico registra convalidaciones.'],
     ['Modalidad', 'Recomendada. Presencial, Semi Presencial o A distancia. Si se omite la columna o la celda, el modelo reparte esa fila entre las tres con la composición histórica de su sede y carrera.'],
     ['Nuevos', 'Obligatoria. Número entero de ingresantes de esa combinación.'],
     ['CiclosPlan', 'Opcional. Ciclos totales del plan de estudios. Sólo hace falta para un programa nuevo cuya duración no sea de ' + S.D.planDefecto + ' ciclos.'],
@@ -455,6 +529,20 @@ async function descargarPlantilla() {
     ['Al no tener historia propia, el modelo le aplica el comportamiento de continuación del ciclo'],
     ['y de la sede correspondientes, e informa de ello en la pestaña «Ingresantes».'],
     ['Si el plan no dura ' + S.D.planDefecto + ' ciclos, indíquelo en «CiclosPlan».'],
+    [],
+    [H('Si no sabe en qué ciclo entrarán')],
+    ['Deje la columna «Ciclo» vacía —o quítela— y declare sólo el total por semestre, sede,'],
+    ['carrera y modalidad. El modelo lo reparte con las tasas del histórico, que separa en:'],
+    ['  NIVEL   cuántos entran por encima del ciclo 1. Va del 0,2 % de Obstetricia al 19,7 % de'],
+    ['          Contabilidad, y es más del doble en las modalidades no presenciales. Depende'],
+    ['          además de la paridad del semestre: en los segundos semestres la cuota sube,'],
+    ['          porque lo que baja es la campaña de ciclo 1, no el número de convalidados.'],
+    ['  FORMA   a qué ciclo llegan. Es casi universal: 57 % al ciclo 2, 21 % al 3, 13 % al 4'],
+    ['          y 9 % al 5 o más.'],
+    ['El reparto respeta el ciclo terminal del plan y el tope de maduración de una sede nueva,'],
+    ['y conserva el total exacto: no se pierde ni se inventa ningún ingresante.'],
+    ['Conviene declarar el ciclo cuando se conozca: la estimación describe el comportamiento'],
+    ['medio del histórico, no una política de admisión que vaya a cambiar.'],
     [],
     [H('Por qué conviene declarar la modalidad')],
     ['La modalidad cambia el comportamiento del estudiante de forma muy marcada. En el primer'],

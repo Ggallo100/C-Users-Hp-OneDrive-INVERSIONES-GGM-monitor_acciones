@@ -99,6 +99,18 @@ def compactar():
                 [int(x) for x in nm.loc[(s, c, ci, pa, t)].values]
                 for (s, c, ci, pa, t) in nm.index]
 
+    # ---- ciclo de ingreso: [is, ic, im, par, ip, ciclo1..cicloN] ----------
+    # Sirve cuando el archivo de entrada no declara el ciclo. El 96,2 % de los
+    # ingresantes entra en el primero, pero el resto son convalidaciones de
+    # estudios previos cuyo volumen depende con fuerza de la carrera y de la
+    # modalidad. El motor separa nivel y forma; aquí sólo van los conteos.
+    ciclos_n = list(range(1, int(b["Ciclo"].max()) + 1))
+    nc = (n.groupby(["Sede", "Carrera", "Modalidad_estudios", "par", "t", "Ciclo"]).size()
+          .unstack("Ciclo", fill_value=0).reindex(columns=ciclos_n, fill_value=0))
+    filas_nc = [[iS[s], iC[c], iM[m], int(pa), int(t)] +
+                [int(x) for x in nc.loc[(s, c, m, pa, t)].values]
+                for (s, c, m, pa, t) in nc.index]
+
     # ---- stock y nuevos observados ---------------------------------------
     st = stock_observado(b)
     nu = nuevos_observados(b)
@@ -145,7 +157,7 @@ def compactar():
         "planCiclos": plan, "planDefecto": 10,
         "sedeApertura": apertura, "oferta": oferta,
         "cont": filas_cont, "av": filas_av, "tu": filas_tu,
-        "nt": filas_nt, "nm": filas_nm,
+        "nt": filas_nt, "nm": filas_nm, "nc": filas_nc,
         "stock": filas_st, "nuevos": filas_nu,
         "varianza": varianza_proceso(b, nper),
         "meta": {
@@ -172,7 +184,7 @@ if __name__ == "__main__":
     d = compactar()
     js = json.dumps(limpia(d), ensure_ascii=False, separators=(",", ":"))
     open("compacto.json", "w", encoding="utf-8").write(js)
-    print("Filas: cont=%d av=%d tu=%d nt=%d nm=%d stock=%d nuevos=%d oferta=%d" %
+    print("Filas: cont=%d av=%d tu=%d nt=%d nm=%d nc=%d stock=%d nuevos=%d oferta=%d" %
           (len(d["cont"]), len(d["av"]), len(d["tu"]), len(d["nt"]), len(d["nm"]),
-           len(d["stock"]), len(d["nuevos"]), len(d["oferta"])))
+           len(d["nc"]), len(d["stock"]), len(d["nuevos"]), len(d["oferta"])))
     print("compacto.json: %.1f KB" % (len(js.encode()) / 1024))

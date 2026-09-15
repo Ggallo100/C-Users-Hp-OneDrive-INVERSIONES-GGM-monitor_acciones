@@ -291,6 +291,47 @@ function estimar(D, lam, lamN, factorK) {
   }
   const kModalidad = kDirichlet(Array.from(nmCelda.values())) * factorK;
 
+  /* ---- mezcla de CICLO de ingreso de los ingresantes ----
+     Se estima en dos partes porque el histórico se comporta distinto en cada
+     una. El NIVEL —cuántos entran por encima del ciclo 1— va del 0,2 % de
+     Obstetricia al 19,7 % de Contabilidad y es más del doble en las
+     modalidades no presenciales; además depende de la paridad del semestre,
+     porque lo que cambia entre paridades es el denominador (la campaña de
+     ciclo 1) y no el número de convalidados. La FORMA —a qué ciclo llegan—
+     es casi universal, así que le basta una cascada corta. */
+  const NCI = D.cicloMax;
+  const nivAdd = (m, k, tot, alto) => {
+    const a = m.get(k) || [0, 0];
+    a[0] += tot; a[1] += alto; m.set(k, a);
+  };
+  const ncNivCelda = new Map(), ncNivCmPar = new Map(), ncNivCarPar = new Map(),
+    ncNivModaPar = new Map(), ncNivPar = new Map();
+  const ncFormaCelda = new Map(), ncFormaCm = new Map(), ncFormaCar = new Map(),
+    ncFormaModa = new Map();
+  const ncFormaGlobal = new Array(NCI - 1).fill(0);
+  let ncGlobTot = 0, ncGlobAlto = 0;
+  for (const f of D.nc || []) {
+    const [is, ic, im, pa, ip] = f, v = f.slice(5), mult = wN(ip);
+    let tot = 0;
+    for (let i = 0; i < v.length; i++) tot += v[i] * mult;
+    const alto = tot - v[0] * mult;
+    const cola = v.slice(1);
+    nivAdd(ncNivCelda, is + '|' + ic + '|' + im + '|' + pa, tot, alto);
+    nivAdd(ncNivCmPar, ic + '|' + im + '|' + pa, tot, alto);
+    nivAdd(ncNivCarPar, ic + '|' + pa, tot, alto);
+    nivAdd(ncNivModaPar, im + '|' + pa, tot, alto);
+    nivAdd(ncNivPar, String(pa), tot, alto);
+    ncGlobTot += tot; ncGlobAlto += alto;
+    suma(ncFormaCelda, is + '|' + ic + '|' + im + '|' + pa, NCI - 1, cola, mult);
+    suma(ncFormaCm, ic + '|' + im, NCI - 1, cola, mult);
+    suma(ncFormaCar, String(ic), NCI - 1, cola, mult);
+    suma(ncFormaModa, String(im), NCI - 1, cola, mult);
+    for (let i = 0; i < NCI - 1; i++) ncFormaGlobal[i] += cola[i] * mult;
+  }
+  const celdasNiv = Array.from(ncNivCmPar.values());
+  const kNivelCiclo = kBetaBinom(celdasNiv.map(a => a[1]), celdasNiv.map(a => a[0])) * factorK;
+  const kFormaCiclo = kDirichlet(Array.from(ncFormaCelda.values())) * factorK;
+
   return {
     D, lam, lamN, factorK, LAG, ND, NT, NM, NC,
     celda, porCarrera, porModa, porCond, porCicloPar, porCiclo, contGlobal, kCont,
@@ -298,6 +339,9 @@ function estimar(D, lam, lamN, factorK) {
     tuCelda, tuCond, tuModa, tuSede, kTurno,
     ntCelda, ntCarModaPar, ntCarModa, ntSedeModaPar, ntSedeModa, ntSede, ntGlobal, kNuevos,
     nmCelda, nmCarPar, nmCar, nmSedePar, nmSede, nmGlobal, kModalidad,
+    NCI, ncNivCelda, ncNivCmPar, ncNivCarPar, ncNivModaPar, ncNivPar,
+    ncGlobTot, ncGlobAlto, kNivelCiclo,
+    ncFormaCelda, ncFormaCm, ncFormaCar, ncFormaModa, ncFormaGlobal, kFormaCiclo,
     // Apertura por índice de sede; la interfaz la amplía con las sedes nuevas
     // que aparezcan en el archivo de ingresantes.
     apertura: D.sedes.map(s2 => D.sedeApertura[s2] || { enMaduracion: false }),
@@ -308,7 +352,7 @@ function estimar(D, lam, lamN, factorK) {
     iT: new Map(D.turnos.map((v, i) => [v, i])),
     iD: new Map(D.condiciones.map((v, i) => [v, i])),
     cacheQ: new Map(), cacheAv: new Map(), cacheTu: new Map(),
-    cacheNt: new Map(), cacheNm: new Map(),
+    cacheNt: new Map(), cacheNm: new Map(), cacheNc: new Map(),
   };
 }
 
@@ -464,6 +508,56 @@ function mezclaNuevos(E, is, ic, im, ciclo, par) {
  * entrada no la declara. La paridad condiciona porque la mezcla oscila mucho
  * entre semestres: en el segundo la modalidad a distancia pesa bastante más.
  */
+/*
+ * Reparto estimado de los ingresantes por CICLO de ingreso, para cuando el
+ * archivo de entrada no lo declara. Devuelve [vector sobre 1..cicloMax,
+ * tamaño efectivo, nivel de la cascada que aportó la última evidencia].
+ *
+ * `tope` recorta el ciclo máximo admisible —el terminal del plan de la carrera
+ * o el de maduración de la sede— acumulando en el tope lo que caiga por encima,
+ * que es lo mismo que hace la matriz de avance con un estudiante retenido.
+ */
+function mezclaCiclo(E, is, ic, im, par, tope) {
+  const ck = is + ',' + ic + ',' + im + ',' + par + ',' + (tope || 0);
+  const hit = E.cacheNc.get(ck); if (hit) return hit;
+  const N = E.NCI;
+  // --- nivel ---
+  const k = E.kNivelCiclo;
+  let est = E.ncGlobTot > 0 ? E.ncGlobAlto / E.ncGlobTot : 0;
+  let nef = 0, nivel = 'global';
+  const cad = [
+    ['paridad', E.ncNivPar.get(String(par))],
+    ['modalidad·paridad', E.ncNivModaPar.get(im + '|' + par)],
+    ['carrera·paridad', E.ncNivCarPar.get(ic + '|' + par)],
+    ['carrera·modalidad·paridad', E.ncNivCmPar.get(ic + '|' + im + '|' + par)],
+    ['sede·carrera·modalidad·paridad', E.ncNivCelda.get(is + '|' + ic + '|' + im + '|' + par)],
+  ];
+  for (const [nom, a] of cad) {
+    if (!a || a[0] <= 0) continue;
+    est = (a[1] + k * est) / (a[0] + k);
+    nef = a[0] + k; nivel = nom;
+  }
+  est = Math.min(Math.max(est, 0), 1);
+  // --- forma ---
+  const [forma] = cascada([
+    ['modalidad', E.ncFormaModa.get(String(im))],
+    ['carrera', E.ncFormaCar.get(String(ic))],
+    ['carrera·modalidad', E.ncFormaCm.get(ic + '|' + im)],
+    ['celda', E.ncFormaCelda.get(is + '|' + ic + '|' + im + '|' + par)],
+  ], E.ncFormaGlobal, E.kFormaCiclo);
+  const v = new Array(N).fill(0);
+  v[0] = 1 - est;
+  for (let i = 1; i < N; i++) v[i] = est * forma[i - 1];
+  if (tope && tope < N) {
+    for (let i = tope; i < N; i++) { v[tope - 1] += v[i]; v[i] = 0; }
+  }
+  let sv = 0; for (let i = 0; i < N; i++) sv += v[i];
+  if (sv > 0) for (let i = 0; i < N; i++) v[i] /= sv;
+  const r = [v, Math.max(nef, 1), nivel];
+  E.cacheNc.set(ck, r);
+  return r;
+}
+
 function mezclaModalidad(E, is, ic, ciclo, par) {
   const ck = is + ',' + ic + ',' + ciclo + ',' + par;
   const hit = E.cacheNm.get(ck); if (hit) return hit;
