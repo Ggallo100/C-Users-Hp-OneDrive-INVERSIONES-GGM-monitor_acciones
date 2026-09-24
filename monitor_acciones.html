@@ -96,6 +96,23 @@ svg{display:block}
 .ma-chip[aria-pressed="true"]{color:var(--c);border-color:var(--c);background:color-mix(in srgb,var(--c) 12%,transparent)}
 .ma-chip[aria-pressed="false"] i{background:var(--faint)}
 .sep{width:1px;height:18px;background:var(--line-2)}
+.pos{font:11px var(--mono);color:var(--muted);gap:10px;flex-wrap:wrap;row-gap:4px}
+.pos label{display:inline-flex;align-items:center;gap:5px;font:600 11px var(--sans);color:var(--muted)}
+.buy,.risk input{width:74px;border:1px solid var(--line-2);background:var(--panel-2);border-radius:6px;padding:2px 6px;font:500 12px var(--mono);text-align:right}
+.buy:focus,.risk input:focus{border-color:var(--accent);outline:none}
+.buy::placeholder{color:var(--faint)}
+.pos b{color:var(--text);font-weight:500}
+.pos .pstop b{color:var(--down)} .pos .ptp b{color:var(--up)}
+.pl{font-weight:600}
+.badge{font:700 10px var(--sans);letter-spacing:.5px;text-transform:uppercase;border-radius:5px;padding:2px 6px;display:none}
+.panel.hit-stop .badge{display:inline-block;background:var(--down);color:#fff}
+.panel.hit-tp .badge{display:inline-block;background:var(--up);color:#fff}
+.panel.hit-stop{border-color:var(--down);box-shadow:0 0 0 1px var(--down)}
+.panel.hit-tp{border-color:var(--up);box-shadow:0 0 0 1px var(--up)}
+.risk{display:flex;align-items:center;gap:10px}
+.risk label{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--muted);white-space:nowrap}
+.risk input{width:56px}
+.risk .rs{color:var(--down)} .risk .rt{color:var(--up)}
 .kindbtn{min-width:44px;justify-content:center}
 
 .cwrap{position:relative;flex:1;min-height:0}
@@ -174,6 +191,10 @@ dialog::backdrop{background:rgba(3,6,12,.6)}
       <div class="seg" id="layoutSeg" role="group" aria-label="Número de gráficos">
         <button data-n="1">1</button><button data-n="2">2</button><button data-n="3">3</button><button data-n="4">4</button><button data-n="6">6</button>
       </div>
+    </div>
+    <div class="risk" title="Se aplican a todos los gráficos que tengan precio de compra">
+      <label><span class="rs">■</span> Stop-loss <input id="slIn" type="number" inputmode="decimal" min="0" max="99" step="0.5" aria-label="Stop-loss global en %"> %</label>
+      <label><span class="rt">■</span> Meta <input id="tpIn" type="number" inputmode="decimal" min="0" step="0.5" aria-label="Meta de ganancia global en %"> %</label>
     </div>
     <button class="btn" id="syncBtn" aria-pressed="false" title="Sincroniza el desplazamiento/zoom temporal y la cruz entre gráficos">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 12a8 8 0 0 1 14-5.3L20 9"/><path d="M20 4v5h-5"/><path d="M20 12a8 8 0 0 1-14 5.3L4 15"/><path d="M4 20v-5h5"/></svg>
@@ -267,6 +288,7 @@ dialog::backdrop{background:rgba(3,6,12,.6)}
         <tr><td><kbd>F</kbd> · <kbd>Esc</kbd></td><td>Maximizar / restaurar el gráfico activo</td></tr>
         <tr><td><kbd>?</kbd></td><td>Esta ayuda</td></tr>
       </table>
+      <span class="hint" style="color:var(--muted);font-size:11.5px">Posición: escribe el precio de <b>Compra</b> en cada gráfico (se guarda por símbolo). El <b>Stop-loss</b> y la <b>Meta</b> de la barra superior son % globales sobre ese precio y se dibujan como líneas; el gráfico se marca en rojo o verde y avisa cuando el precio los alcanza.</span>
       <span class="hint" style="color:var(--muted);font-size:11.5px">Medias móviles en semanas: en diario se calculan con 5 × N sesiones (10s = 50 sesiones), en semanal con N cierres semanales y en mensual se muestra el valor semanal al cierre de cada mes.</span>
     </div>
   </form>
@@ -326,12 +348,14 @@ const saved = lsGet('mnyse.state', {});
 const state = {
   n: [1,2,3,4,6].includes(saved.n) ? saved.n : 6,
   sync: !!saved.sync,
+  sl: saved.sl ?? 8, tp: saved.tp ?? 20,
+  buys: saved.buys || {}, // precio de compra por símbolo
   theme: saved.theme || (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'),
   panels: Array.from({ length: MAX_PANELS }, (_, i) => Object.assign(
     { ticker: DEFAULT_TICKERS[i], type: 'candles', tf: 'D', ma: { 10: true, 20: false, 50: true }, maKind: 'SMA', vol: true },
     (saved.panels || [])[i] || {}))
 };
-const persist = () => lsSet('mnyse.state', { n: state.n, sync: state.sync, theme: state.theme, panels: state.panels });
+const persist = () => lsSet('mnyse.state', { n: state.n, sync: state.sync, sl: state.sl, tp: state.tp, buys: state.buys, theme: state.theme, panels: state.panels });
 document.documentElement.dataset.theme = state.theme;
 
 /* ================= Capa de datos ================= */
@@ -566,6 +590,10 @@ class Panel {
           <span class="quote"><span class="dot" title="Tiempo real"></span><span class="qprice">—</span><span class="qchg"></span></span>
           <button class="icon-btn maxbtn" title="Maximizar (F)" aria-label="Maximizar">${ICONS.max}</button>
         </div>
+        <div class="prow pos">
+          <label>Compra <input class="buy" inputmode="decimal" autocomplete="off" placeholder="precio" aria-label="Precio de compra del gráfico ${i + 1}"></label>
+          <span class="pl"></span><span class="pstop"></span><span class="ptp"></span><span class="badge"></span>
+        </div>
         <div class="tools">
           <div class="seg typeSeg" role="group" aria-label="Tipo de gráfico">
             ${Object.entries(TYPES).map(([k, v]) => `<button data-type="${k}" title="${v}" aria-label="${v}">${ICONS[k]}</button>`).join('')}
@@ -646,6 +674,41 @@ class Panel {
     else if (this.cfg.type === 'bars') this.main = this.chart.addSeries(LWC.BarSeries, { ...common, upColor: c.up, downColor: c.down, thinBars: false, openVisible: true });
     else this.main = this.chart.addSeries(LWC.CandlestickSeries, { ...common, upColor: c.up, downColor: c.down, borderUpColor: c.up, borderDownColor: c.down, wickUpColor: c.up, wickDownColor: c.down });
     for (const w of MA_WEEKS) if (this.cfg.ma[w]) this.addMA(w);
+    this.levels = []; this.drawLevels();
+  }
+  // Niveles de la posición: compra, stop-loss y meta (globales en %).
+  get buy() { return state.buys[this.cfg.ticker] ?? null; }
+  set buy(v) { if (v > 0) state.buys[this.cfg.ticker] = v; else delete state.buys[this.cfg.ticker]; }
+  levelPrices() {
+    const buy = this.buy; if (!(buy > 0)) return null;
+    return { buy, stop: state.sl > 0 ? buy * (1 - state.sl / 100) : null, tp: state.tp > 0 ? buy * (1 + state.tp / 100) : null };
+  }
+  drawLevels() {
+    (this.levels || []).forEach(l => this.main.removePriceLine(l)); this.levels = [];
+    const L = this.levelPrices(), c = colors();
+    if (L) {
+      const line = (price, color, title, style, width) => this.levels.push(this.main.createPriceLine({ price, color, title, lineStyle: style, lineWidth: width, axisLabelVisible: true }));
+      line(L.buy, c.accent, 'Compra', LWC.LineStyle.Solid, 2);
+      if (L.stop != null) line(L.stop, c.down, `Stop −${state.sl}%`, LWC.LineStyle.Dashed, 1);
+      if (L.tp != null) line(L.tp, c.up, `Meta +${state.tp}%`, LWC.LineStyle.Dashed, 1);
+    }
+    this.renderPosition();
+  }
+  renderPosition() {
+    const L = this.levelPrices(), q = s => this.q('.pos ' + s);
+    if (!L || !this.feed?.daily) {
+      q('.pl').textContent = ''; q('.pstop').textContent = ''; q('.ptp').textContent = ''; q('.badge').textContent = '';
+      this.el.classList.remove('hit-stop', 'hit-tp'); this.hit = null; return;
+    }
+    const d = this.feed.daily, px = d[d.length - 1].close, pl = (px / L.buy - 1) * 100;
+    const pe = q('.pl'); pe.textContent = `P/G ${fmtPct(pl)}`; pe.className = 'pl ' + (pl >= 0 ? 'up' : 'down');
+    q('.pstop').innerHTML = L.stop != null ? `Stop <b>${fmtP(L.stop)}</b> (${fmtPct((L.stop / px - 1) * 100)})` : '';
+    q('.ptp').innerHTML = L.tp != null ? `Meta <b>${fmtP(L.tp)}</b> (${fmtPct((L.tp / px - 1) * 100)})` : '';
+    const hit = L.stop != null && px <= L.stop ? 'stop' : L.tp != null && px >= L.tp ? 'tp' : null;
+    this.el.classList.toggle('hit-stop', hit === 'stop'); this.el.classList.toggle('hit-tp', hit === 'tp');
+    q('.badge').textContent = hit === 'stop' ? 'Stop alcanzado' : hit === 'tp' ? 'Meta alcanzada' : '';
+    if (hit && this.hit !== undefined && hit !== this.hit) toast(`${this.cfg.ticker}: ${hit === 'stop' ? 'precio en el stop-loss' : 'meta de ganancia alcanzada'} (${fmtP(px)})`);
+    this.hit = hit;
   }
   addMA(w) {
     this.maS[w] = this.chart.addSeries(LWC.LineSeries, {
@@ -659,7 +722,7 @@ class Panel {
     const commit = () => {
       const t = inp.value.trim().toUpperCase().replace(/[^A-Z0-9.\-]/g, '');
       if (!t) { inp.value = this.cfg.ticker; return; }
-      if (t !== this.cfg.ticker) { this.cfg.ticker = t; persist(); this.load(); }
+      if (t !== this.cfg.ticker) { this.cfg.ticker = t; persist(); this.hit = undefined; this.load(); this.drawLevels(); }
       inp.value = t;
     };
     inp.addEventListener('keydown', e => { if (e.key === 'Enter') { commit(); inp.blur(); } if (e.key === 'Escape') { inp.value = this.cfg.ticker; inp.blur(); } });
@@ -671,6 +734,15 @@ class Panel {
     this.el.querySelectorAll('[data-ma]').forEach(b => b.addEventListener('click', () => this.toggleMA(+b.dataset.ma)));
     this.q('.volbtn').addEventListener('click', () => { this.cfg.vol = !this.cfg.vol; persist(); this.syncUI(); this.render(false); });
     this.q('.maxbtn').addEventListener('click', () => toggleMax(this));
+    const buy = this.q('.buy');
+    const commitBuy = () => {
+      const raw = buy.value.trim().replace(/\s/g, '').replace(',', '.'), v = raw === '' ? null : parseFloat(raw);
+      if (raw !== '' && !(v > 0)) { buy.value = this.buy ?? ''; toast('Precio de compra no válido'); return; }
+      this.buy = v; persist(); panels.forEach(o => o !== this && o.cfg.ticker === this.cfg.ticker && (o.syncUI(), o.drawLevels())); this.hit = undefined; buy.value = v == null ? '' : v.toFixed(2); this.drawLevels();
+    };
+    buy.addEventListener('change', commitBuy);
+    buy.addEventListener('keydown', e => { if (e.key === 'Enter') buy.blur(); if (e.key === 'Escape') { buy.value = this.buy ?? ''; buy.blur(); } });
+    buy.addEventListener('focus', () => setActive(this));
     this.el.addEventListener('pointerdown', () => setActive(this));
   }
   syncUI() {
@@ -681,6 +753,7 @@ class Panel {
     this.q('.kindbtn').textContent = this.cfg.maKind;
     this.el.querySelectorAll('[data-ma]').forEach(b => b.setAttribute('aria-pressed', !!this.cfg.ma[b.dataset.ma]));
     this.q('.volbtn').setAttribute('aria-pressed', this.cfg.vol);
+    if (document.activeElement !== this.q('.buy')) this.q('.buy').value = this.buy > 0 ? this.buy.toFixed(2) : '';
   }
 
   setType(t) { if (!TYPES[t] || t === this.cfg.type) return; this.cfg.type = t; persist(); this.syncUI(); this.createMain(); this.render(false); }
@@ -764,6 +837,7 @@ class Panel {
       qp.classList.add(last.close > before ? 'flash-up' : 'flash-down');
       requestAnimationFrame(() => requestAnimationFrame(() => qp.classList.remove('flash-up', 'flash-down')));
     }
+    this.renderPosition();
     const qc = this.q('.qchg'); qc.textContent = `${chg >= 0 ? '+' : ''}${fmtP(chg)} (${fmtPct(pct)})`; qc.className = 'qchg ' + (chg >= 0 ? 'up' : 'down');
   }
   setLive(on) { this.q('.quote .dot').className = 'dot' + (on ? ' live' : ''); }
@@ -815,6 +889,7 @@ class Panel {
     if (this.cfg.type === 'line') this.main.applyOptions({ color: c.accent });
     else this.main.applyOptions({ upColor: c.up, downColor: c.down, ...(this.cfg.type === 'candles' ? { borderUpColor: c.up, borderDownColor: c.down, wickUpColor: c.up, wickDownColor: c.down } : {}) });
     for (const w in this.maS) this.maS[w].applyOptions({ color: c.ma[w] });
+    this.drawLevels();
     this.render(false);
   }
 
@@ -859,6 +934,16 @@ function exitMax() { grid.classList.remove('has-max'); panels.forEach(o => o.el.
 
 /* ================= Controles globales ================= */
 $('#layoutSeg').addEventListener('click', e => { const b = e.target.closest('button'); if (b) applyLayout(+b.dataset.n); });
+for (const [id, key] of [['#slIn', 'sl'], ['#tpIn', 'tp']]) {
+  const el = $(id); el.value = state[key] || '';
+  el.addEventListener('change', () => {
+    const v = el.value === '' ? 0 : parseFloat(el.value.replace(',', '.'));
+    if (!(v >= 0) || (key === 'sl' && v >= 100)) { el.value = state[key] || ''; toast(key === 'sl' ? 'El stop-loss debe estar entre 0 y 99 %' : 'La meta debe ser un % positivo'); return; }
+    state[key] = v; persist();
+    panels.forEach(p => { p.hit = undefined; p.drawLevels(); });
+  });
+  el.addEventListener('keydown', e => { if (e.key === 'Enter') el.blur(); });
+}
 const syncBtn = $('#syncBtn');
 syncBtn.setAttribute('aria-pressed', state.sync);
 syncBtn.addEventListener('click', () => {
