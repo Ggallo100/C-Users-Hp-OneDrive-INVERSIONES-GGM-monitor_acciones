@@ -1,0 +1,924 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Monitor NYSE</title>
+<meta name="description" content="Monitor de hasta 6 gráficos históricos interactivos de acciones de Nueva York en tiempo real (TradingView Lightweight Charts 5.2).">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/lightweight-charts@5.2.1/dist/lightweight-charts.standalone.production.js"></script>
+<style>
+:root{
+  --bg:#0b0f17; --panel:#111722; --panel-2:#161d2b; --line:#232c3d; --line-2:#2d384d;
+  --text:#e6ebf4; --muted:#8a96ab; --faint:#5d6980;
+  --accent:#3b82f6; --up:#16c784; --down:#ea3943;
+  --ma10:#f5a524; --ma20:#38bdf8; --ma50:#e879f9;
+  --focus:#3b82f6;
+  --shadow:0 1px 0 rgba(255,255,255,.03) inset;
+  --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --sans:Inter,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  color-scheme:dark;
+}
+:root[data-theme="light"]{
+  --bg:#eef1f6; --panel:#ffffff; --panel-2:#f5f7fb; --line:#dfe4ec; --line-2:#cbd3df;
+  --text:#121826; --muted:#5b6678; --faint:#8b95a7;
+  --accent:#2563eb; --up:#0e9f6e; --down:#d92d3a;
+  --ma10:#d97706; --ma20:#0284c7; --ma50:#c026d3;
+  --focus:#2563eb;
+  color-scheme:light;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{background:var(--bg);color:var(--text);font:13px/1.35 var(--sans);-webkit-font-smoothing:antialiased;overflow:hidden}
+button,input,select{font:inherit;color:inherit}
+button{cursor:pointer}
+.app{display:flex;flex-direction:column;height:100dvh}
+
+/* ---------- Barra superior ---------- */
+.topbar{display:flex;align-items:center;gap:14px;padding:8px 14px;border-bottom:1px solid var(--line);background:var(--panel);flex-wrap:wrap}
+.brand{display:flex;align-items:center;gap:9px;font-weight:700;letter-spacing:.2px;white-space:nowrap}
+.brand-mark{width:26px;height:26px;border-radius:7px;background:linear-gradient(135deg,var(--accent),#8b5cf6);display:grid;place-items:center;color:#fff}
+.brand small{display:block;font-weight:500;color:var(--muted);font-size:11px;letter-spacing:0}
+.market{display:flex;align-items:center;gap:7px;padding:4px 10px;border:1px solid var(--line);border-radius:999px;font-size:12px;color:var(--muted);white-space:nowrap}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--faint);flex:none}
+.dot.open{background:var(--up);box-shadow:0 0 0 3px color-mix(in srgb,var(--up) 25%,transparent)}
+.dot.closed{background:var(--down)}
+.dot.pre{background:var(--ma10)}
+.dot.live{background:var(--up);animation:pulse 1.6s infinite}
+@keyframes pulse{0%{box-shadow:0 0 0 0 color-mix(in srgb,var(--up) 55%,transparent)}100%{box-shadow:0 0 0 7px transparent}}
+.spacer{flex:1}
+.group{display:flex;align-items:center;gap:6px}
+.group-label{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.6px}
+.seg{display:inline-flex;border:1px solid var(--line-2);border-radius:8px;overflow:hidden;background:var(--panel-2)}
+.seg button{border:0;background:transparent;padding:5px 9px;min-width:30px;color:var(--muted);font-weight:600;font-size:12px;display:inline-flex;align-items:center;gap:5px}
+.seg button+button{border-left:1px solid var(--line-2)}
+.seg button:hover{color:var(--text)}
+.seg button[aria-pressed="true"]{background:var(--accent);color:#fff}
+.btn{border:1px solid var(--line-2);background:var(--panel-2);border-radius:8px;padding:5px 10px;display:inline-flex;align-items:center;gap:6px;color:var(--text);font-weight:500;font-size:12px;white-space:nowrap}
+.btn:hover{border-color:var(--accent)}
+.btn[aria-pressed="true"]{border-color:var(--accent);color:var(--accent)}
+.icon-btn{border:1px solid transparent;background:transparent;border-radius:7px;width:28px;height:28px;display:inline-grid;place-items:center;color:var(--muted)}
+.icon-btn:hover{color:var(--text);background:var(--panel-2);border-color:var(--line-2)}
+svg{display:block}
+:focus-visible{outline:2px solid var(--focus);outline-offset:1px}
+
+/* ---------- Rejilla ---------- */
+.grid{flex:1;display:grid;gap:8px;padding:8px;min-height:0}
+.grid[data-n="1"]{grid-template-columns:1fr;grid-template-rows:1fr}
+.grid[data-n="2"]{grid-template-columns:repeat(2,1fr);grid-template-rows:1fr}
+.grid[data-n="3"]{grid-template-columns:repeat(3,1fr);grid-template-rows:1fr}
+.grid[data-n="4"]{grid-template-columns:repeat(2,1fr);grid-template-rows:repeat(2,1fr)}
+.grid[data-n="6"]{grid-template-columns:repeat(3,1fr);grid-template-rows:repeat(2,1fr)}
+.grid.has-max{grid-template-columns:1fr!important;grid-template-rows:1fr!important}
+.grid.has-max .panel:not(.maxed){display:none}
+
+.panel{position:relative;display:flex;flex-direction:column;min-width:0;min-height:0;background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden;box-shadow:var(--shadow)}
+.panel.active{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+.panel.hidden{display:none}
+.phead{display:flex;flex-direction:column;gap:6px;padding:7px 9px 6px;border-bottom:1px solid var(--line);background:var(--panel)}
+.prow{display:flex;align-items:center;gap:8px;min-width:0}
+.pidx{font:600 10px var(--mono);color:var(--faint);border:1px solid var(--line-2);border-radius:5px;padding:1px 5px;flex:none}
+.ticker{width:84px;border:1px solid var(--line-2);background:var(--panel-2);border-radius:7px;padding:4px 8px;font:600 13px var(--mono);text-transform:uppercase;letter-spacing:.5px}
+.ticker:focus{border-color:var(--accent);outline:none}
+.pname{color:var(--muted);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:1}
+.quote{display:flex;align-items:baseline;gap:8px;font-family:var(--mono);white-space:nowrap}
+.qprice{font-weight:600;font-size:15px;border-radius:4px;padding:0 3px;transition:background-color .6s}
+.qprice.flash-up{background:color-mix(in srgb,var(--up) 30%,transparent);transition:none}
+.qprice.flash-down{background:color-mix(in srgb,var(--down) 30%,transparent);transition:none}
+.qchg{font-size:12px;font-weight:500}
+.up{color:var(--up)} .down{color:var(--down)}
+.tools{display:flex;align-items:center;gap:5px;flex-wrap:wrap}
+.tools .seg button{padding:3px 7px;min-width:26px;font-size:11px}
+.ma-chip{border:1px solid var(--line-2);background:var(--panel-2);border-radius:999px;padding:2px 7px;font:600 11px var(--mono);color:var(--muted);display:inline-flex;align-items:center;gap:5px}
+.ma-chip i{width:10px;height:3px;border-radius:2px;background:currentColor;display:inline-block}
+.ma-chip[aria-pressed="true"]{color:var(--c);border-color:var(--c);background:color-mix(in srgb,var(--c) 12%,transparent)}
+.ma-chip[aria-pressed="false"] i{background:var(--faint)}
+.sep{width:1px;height:18px;background:var(--line-2)}
+.kindbtn{min-width:44px;justify-content:center}
+
+.cwrap{position:relative;flex:1;min-height:0}
+.chart{position:absolute;inset:0;touch-action:pan-y}
+.legend{position:absolute;left:8px;top:6px;z-index:3;pointer-events:none;font:11px var(--mono);color:var(--muted);display:flex;flex-direction:column;gap:2px;max-width:calc(100% - 80px)}
+.legend .l1{display:flex;gap:9px;flex-wrap:wrap}
+.legend b{color:var(--text);font-weight:500}
+.legend .ld{color:var(--text);font-weight:600}
+.legend .lma{display:flex;gap:10px;flex-wrap:wrap}
+.overlay{position:absolute;inset:0;z-index:4;display:none;place-items:center;background:color-mix(in srgb,var(--panel) 80%,transparent);color:var(--muted);font-size:12px;text-align:center;padding:16px}
+.overlay.show{display:grid}
+.spinner{width:18px;height:18px;border:2px solid var(--line-2);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite;margin:0 auto 8px}
+@keyframes spin{to{transform:rotate(360deg)}}
+.overlay .err{color:var(--down);max-width:320px}
+
+/* ---------- Pie ---------- */
+.footer{display:flex;align-items:center;gap:14px;padding:5px 14px;border-top:1px solid var(--line);background:var(--panel);color:var(--faint);font-size:11px;flex-wrap:wrap}
+.footer kbd,.help kbd{font:600 10px var(--mono);border:1px solid var(--line-2);border-bottom-width:2px;border-radius:4px;padding:0 5px;color:var(--muted);background:var(--panel-2)}
+.footer a{color:var(--muted)}
+.footer .src{margin-left:auto}
+
+/* ---------- Diálogos ---------- */
+dialog{border:1px solid var(--line-2);background:var(--panel);color:var(--text);border-radius:12px;padding:0;width:min(560px,calc(100vw - 32px));max-height:calc(100dvh - 32px)}
+dialog::backdrop{background:rgba(3,6,12,.6)}
+.dlg-h{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid var(--line)}
+.dlg-h h2{margin:0;font-size:15px}
+.dlg-b{padding:14px 16px;display:flex;flex-direction:column;gap:14px;overflow:auto}
+.dlg-f{display:flex;justify-content:flex-end;gap:8px;padding:12px 16px;border-top:1px solid var(--line)}
+.field{display:flex;flex-direction:column;gap:5px}
+.field label{font-weight:600;font-size:12px}
+.field .hint{color:var(--muted);font-size:11.5px}
+.field input,.field select{border:1px solid var(--line-2);background:var(--panel-2);border-radius:8px;padding:7px 9px}
+.field a{color:var(--accent)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.help table{border-collapse:collapse;width:100%}
+.help th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);padding:10px 0 6px}
+.help td{padding:5px 0;border-bottom:1px solid var(--line);vertical-align:top}
+.help td:first-child{width:46%;color:var(--muted)}
+.help td kbd{margin-right:3px}
+.toast{position:fixed;left:50%;bottom:40px;transform:translateX(-50%);background:var(--panel-2);border:1px solid var(--line-2);padding:8px 14px;border-radius:8px;font-size:12px;z-index:50;opacity:0;transition:opacity .25s;pointer-events:none}
+.toast.show{opacity:1}
+
+/* ---------- Responsive ---------- */
+@media (max-width:1180px){
+  .grid[data-n="3"]{grid-template-columns:repeat(2,1fr);grid-template-rows:repeat(2,1fr)}
+  .grid[data-n="6"]{grid-template-columns:repeat(2,1fr);grid-template-rows:repeat(3,1fr)}
+}
+@media (max-width:760px){
+  body{overflow:auto}
+  .app{height:auto;min-height:100dvh}
+  .topbar{padding:8px 16px;gap:10px}
+  .brand small,.hide-sm{display:none}
+  .grid{display:flex;flex-direction:column;padding:8px 16px;gap:10px}
+  .panel{height:min(72vh,440px);flex:none}
+  .grid.has-max .panel.maxed{height:calc(100dvh - 130px)}
+  .footer .keys{display:none}
+  .ticker{width:74px}
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-mark" aria-hidden="true">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17l5-6 4 4 8-9"/><path d="M14 6h6v6"/></svg>
+      </div>
+      <div>Monitor NYSE<small>Gráficos históricos · tiempo real</small></div>
+    </div>
+    <div class="market" id="market" title="Horario regular NYSE: 9:30–16:00 (Nueva York)">
+      <span class="dot" id="marketDot"></span><span id="marketTxt">—</span>
+    </div>
+    <div class="spacer"></div>
+    <div class="group">
+      <span class="group-label hide-sm">Gráficos</span>
+      <div class="seg" id="layoutSeg" role="group" aria-label="Número de gráficos">
+        <button data-n="1">1</button><button data-n="2">2</button><button data-n="3">3</button><button data-n="4">4</button><button data-n="6">6</button>
+      </div>
+    </div>
+    <button class="btn" id="syncBtn" aria-pressed="false" title="Sincroniza el desplazamiento/zoom temporal y la cruz entre gráficos">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 12a8 8 0 0 1 14-5.3L20 9"/><path d="M20 4v5h-5"/><path d="M20 12a8 8 0 0 1-14 5.3L4 15"/><path d="M4 20v-5h5"/></svg>
+      <span class="hide-sm">Sincronizar</span>
+    </button>
+    <button class="icon-btn" id="themeBtn" title="Tema claro / oscuro" aria-label="Cambiar tema">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+    </button>
+    <button class="icon-btn" id="helpBtn" title="Atajos y gestos (?)" aria-label="Ayuda">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10"/></svg>
+    </button>
+    <button class="icon-btn" id="settingsBtn" title="Fuente de datos" aria-label="Configuración de datos">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+    </button>
+  </header>
+
+  <main class="grid" id="grid" data-n="6"></main>
+
+  <footer class="footer">
+    <span class="keys"><kbd>←</kbd><kbd>→</kbd> desplazar · <kbd>+</kbd><kbd>−</kbd> zoom · <kbd>Inicio</kbd><kbd>Fin</kbd> extremos · <kbd>1</kbd>–<kbd>6</kbd> elegir gráfico · <kbd>Mayús</kbd>+rueda desplazar</span>
+    <span class="src" id="srcTxt">—</span>
+    <span>Gráficos: <a href="https://www.tradingview.com/" target="_blank" rel="noopener">TradingView</a> Lightweight Charts™</span>
+  </footer>
+</div>
+
+<datalist id="tickers"></datalist>
+
+<!-- Configuración de la fuente de datos -->
+<dialog id="settingsDlg">
+  <form method="dialog">
+    <div class="dlg-h"><h2>Fuente de datos</h2><button class="icon-btn" value="cancel" aria-label="Cerrar">✕</button></div>
+    <div class="dlg-b">
+      <div class="field">
+        <label for="histSel">Histórico (diario, hasta ~20 años)</label>
+        <select id="histSel">
+          <option value="demo">Demo — datos simulados (sin clave)</option>
+          <option value="twelve">Twelve Data — datos reales</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="rtSel">Tiempo real</label>
+        <select id="rtSel">
+          <option value="demo">Demo — ticks simulados</option>
+          <option value="finnhub">Finnhub WebSocket — operaciones en tiempo real</option>
+          <option value="twelve">Twelve Data — cotización por consulta periódica</option>
+          <option value="off">Desactivado</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="tdKey">Clave API Twelve Data</label>
+        <input id="tdKey" type="password" autocomplete="off" spellcheck="false" placeholder="apikey">
+        <span class="hint">Gratis en <a href="https://twelvedata.com/pricing" target="_blank" rel="noopener">twelvedata.com</a> (8 solicitudes/min, 800/día). Cada gráfico consume 1 solicitud al cargar.</span>
+      </div>
+      <div class="field">
+        <label for="fhKey">Clave API Finnhub</label>
+        <input id="fhKey" type="password" autocomplete="off" spellcheck="false" placeholder="token">
+        <span class="hint">Gratis en <a href="https://finnhub.io/register" target="_blank" rel="noopener">finnhub.io</a>. El WebSocket entrega cada operación de acciones de EE. UU. en tiempo real.</span>
+      </div>
+      <div class="field">
+        <label for="pollSel">Intervalo de consulta (Twelve Data)</label>
+        <select id="pollSel"><option value="15">15 s</option><option value="30">30 s</option><option value="60">60 s</option><option value="120">120 s</option></select>
+        <span class="hint">Cada consulta usa 1 crédito por símbolo distinto en pantalla.</span>
+      </div>
+      <span class="hint">Las claves se guardan solo en este navegador (localStorage).</span>
+    </div>
+    <div class="dlg-f"><button class="btn" value="cancel">Cancelar</button><button class="btn primary" id="saveSettings" value="save">Guardar y recargar datos</button></div>
+  </form>
+</dialog>
+
+<!-- Ayuda: atajos y gestos -->
+<dialog id="helpDlg" class="help">
+  <form method="dialog">
+    <div class="dlg-h"><h2>Navegación en los gráficos</h2><button class="icon-btn" value="close" aria-label="Cerrar">✕</button></div>
+    <div class="dlg-b">
+      <table>
+        <tr><th>Acción</th><th>Laptop / PC</th><th>Celular</th></tr>
+        <tr><td>Acercar / alejar</td><td>Rueda del ratón</td><td>Pellizcar</td></tr>
+        <tr><td>Desplazarse en el tiempo</td><td>Arrastrar, o <kbd>Mayús</kbd> + rueda</td><td>Deslizar el dedo</td></tr>
+        <tr><td>Ver datos de una barra</td><td>Pasar el cursor</td><td>Tocar la barra</td></tr>
+        <tr><td>Escala de precios</td><td>Arrastrar el eje derecho · doble clic restablece</td><td>—</td></tr>
+      </table>
+      <table>
+        <tr><th colspan="2">Atajos de teclado (gráfico activo, borde azul)</th></tr>
+        <tr><td><kbd>←</kbd> <kbd>→</kbd></td><td>Desplazar 1 barra (con <kbd>Mayús</kbd>: 10 barras)</td></tr>
+        <tr><td><kbd>+</kbd> <kbd>−</kbd></td><td>Acercar / alejar</td></tr>
+        <tr><td><kbd>Inicio</kbd></td><td>Ir al primer dato histórico</td></tr>
+        <tr><td><kbd>Fin</kbd></td><td>Volver a la última barra (tiempo real)</td></tr>
+        <tr><td><kbd>1</kbd> … <kbd>6</kbd></td><td>Activar el gráfico n.º</td></tr>
+        <tr><td><kbd>L</kbd> <kbd>V</kbd> <kbd>B</kbd></td><td>Línea / Velas / Barras</td></tr>
+        <tr><td><kbd>D</kbd> <kbd>S</kbd> <kbd>M</kbd></td><td>Temporalidad diaria / semanal / mensual</td></tr>
+        <tr><td><kbd>F</kbd> · <kbd>Esc</kbd></td><td>Maximizar / restaurar el gráfico activo</td></tr>
+        <tr><td><kbd>?</kbd></td><td>Esta ayuda</td></tr>
+      </table>
+      <span class="hint" style="color:var(--muted);font-size:11.5px">Medias móviles en semanas: en diario se calculan con 5 × N sesiones (10s = 50 sesiones), en semanal con N cierres semanales y en mensual se muestra el valor semanal al cierre de cada mes.</span>
+    </div>
+  </form>
+</dialog>
+
+<div class="toast" id="toast"></div>
+
+<script>
+(() => {
+'use strict';
+const LWC = window.LightweightCharts;
+if (!LWC) { document.getElementById('grid').innerHTML = '<p style="padding:20px">No se pudo cargar TradingView Lightweight Charts. Revisa tu conexión.</p>'; return; }
+
+/* ================= Constantes ================= */
+const MAX_PANELS = 6;
+const MA_WEEKS = [10, 20, 50];
+const TYPES = { line: 'Línea', candles: 'Velas', bars: 'Barras' };
+const TFS = { D: 'Diario', W: 'Semanal', M: 'Mensual' };
+const DEFAULT_TICKERS = ['NVDA', 'AAPL', 'MSFT', 'BABA', 'ASML', 'JPM'];
+const SYMBOLS = {
+  AAPL:['Apple Inc.',255], MSFT:['Microsoft Corp.',510], NVDA:['NVIDIA Corp.',180], AMZN:['Amazon.com Inc.',228],
+  GOOGL:['Alphabet Inc. (A)',245], META:['Meta Platforms',760], TSLA:['Tesla Inc.',420], BRK_B:['Berkshire Hathaway B',490],
+  JPM:['JPMorgan Chase & Co.',310], V:['Visa Inc.',345], MA:['Mastercard Inc.',580], XOM:['Exxon Mobil Corp.',114],
+  CVX:['Chevron Corp.',158], KO:['Coca-Cola Co.',68], PEP:['PepsiCo Inc.',145], WMT:['Walmart Inc.',102],
+  JNJ:['Johnson & Johnson',178], PG:['Procter & Gamble',155], UNH:['UnitedHealth Group',330], HD:['Home Depot',410],
+  BAC:['Bank of America',50], GS:['Goldman Sachs',780], MS:['Morgan Stanley',155], DIS:['Walt Disney Co.',113],
+  NKE:['Nike Inc.',72], IBM:['IBM',285], ORCL:['Oracle Corp.',300], CRM:['Salesforce',245], AMD:['Advanced Micro Devices',160],
+  INTC:['Intel Corp.',30], AVGO:['Broadcom Inc.',340], TSM:['Taiwan Semiconductor ADR',280], ASML:['ASML Holding NV',950],
+  BABA:['Alibaba Group ADR',175], NFLX:['Netflix Inc.',1200], CAT:['Caterpillar Inc.',470], BA:['Boeing Co.',215],
+  GE:['GE Aerospace',300], LLY:['Eli Lilly & Co.',780], PFE:['Pfizer Inc.',25], MRK:['Merck & Co.',85], T:['AT&T Inc.',28],
+  VZ:['Verizon',44], PLTR:['Palantir Technologies',180], UBER:['Uber Technologies',98], SPY:['SPDR S&P 500 ETF',665],
+  QQQ:['Invesco QQQ Trust',595], DIA:['SPDR Dow Jones ETF',462], GLD:['SPDR Gold Shares',345], TLT:['iShares 20+ Yr Treasury',90]
+};
+const nameOf = t => (SYMBOLS[t.replace(/[.\-]/g,'_')] || [''])[0];
+
+/* ================= Utilidades ================= */
+const $ = (s, r = document) => r.querySelector(s);
+const cssVar = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const lsGet = (k, d) => { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch { return d; } };
+const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
+const fmtP = v => v == null || isNaN(v) ? '—' : v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const fmtV = v => { if (v == null || isNaN(v)) return '—'; const a = Math.abs(v);
+  return a >= 1e9 ? (v/1e9).toFixed(2)+'B' : a >= 1e6 ? (v/1e6).toFixed(2)+'M' : a >= 1e3 ? (v/1e3).toFixed(1)+'K' : String(Math.round(v)); };
+const fmtPct = v => (v >= 0 ? '+' : '') + v.toFixed(2) + '%';
+const isoUTC = d => d.toISOString().slice(0, 10);
+const nyDateFmt = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' });
+const nyPartsFmt = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', weekday: 'short', hour: '2-digit', minute: '2-digit', hour12: false });
+const nyDate = (ms = Date.now()) => nyDateFmt.format(new Date(ms));
+const MESES = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+const fmtDate = (s, tf) => { const [y, m, d] = s.split('-'); return tf === 'M' ? `${MESES[+m-1]} ${y}` : `${+d} ${MESES[+m-1]} ${y}`; };
+let toastTimer;
+function toast(msg) { const t = $('#toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), 2600); }
+
+/* ================= Estado persistente ================= */
+const settings = Object.assign({ hist: 'demo', rt: 'demo', tdKey: '', fhKey: '', poll: 60 }, lsGet('mnyse.settings', {}));
+const saved = lsGet('mnyse.state', {});
+const state = {
+  n: [1,2,3,4,6].includes(saved.n) ? saved.n : 6,
+  sync: !!saved.sync,
+  theme: saved.theme || (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'),
+  panels: Array.from({ length: MAX_PANELS }, (_, i) => Object.assign(
+    { ticker: DEFAULT_TICKERS[i], type: 'candles', tf: 'D', ma: { 10: true, 20: false, 50: true }, maKind: 'SMA', vol: true },
+    (saved.panels || [])[i] || {}))
+};
+const persist = () => lsSet('mnyse.state', { n: state.n, sync: state.sync, theme: state.theme, panels: state.panels });
+document.documentElement.dataset.theme = state.theme;
+
+/* ================= Capa de datos ================= */
+// Un único arreglo diario por símbolo, compartido por todos los gráficos que lo muestran.
+const feeds = new Map(); // ticker -> { daily, promise, prevClose, subs:Set<Panel> }
+
+function hashStr(s) { let h = 2166136261; for (const c of s) { h ^= c.charCodeAt(0); h = Math.imul(h, 16777619); } return h >>> 0; }
+function rng(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+
+function demoHistory(ticker) {
+  const r = rng(hashStr(ticker));
+  const gauss = () => Math.sqrt(-2 * Math.log(r() + 1e-12)) * Math.cos(2 * Math.PI * r());
+  const base = (SYMBOLS[ticker.replace(/[.\-]/g,'_')] || [0, 20 + (hashStr(ticker) % 380)])[1];
+  const vol = 0.018 + r() * 0.014, drift = 0.0004 + r() * 0.0004;
+  const end = new Date(nyDate() + 'T00:00:00Z'), d = new Date(Date.UTC(2006, 0, 3));
+  const out = []; let px = 10, regime = 1;
+  while (d <= end) {
+    const dow = d.getUTCDay();
+    if (dow !== 0 && dow !== 6) {
+      if (r() < 0.004) regime = r() < 0.5 ? 1.9 : 0.8;
+      const o = px * (1 + gauss() * vol * 0.25);
+      const c = o * Math.exp(drift + gauss() * vol * regime);
+      const h = Math.max(o, c) * (1 + Math.abs(gauss()) * vol * 0.45);
+      const l = Math.min(o, c) * (1 - Math.abs(gauss()) * vol * 0.45);
+      out.push({ time: isoUTC(d), open: o, high: h, low: l, close: c, volume: (0.6 + r() * 0.9) * 1e6 * (1 + Math.abs(c/o - 1) * 40) });
+      px = c;
+    }
+    d.setUTCDate(d.getUTCDate() + 1);
+  }
+  const k = base / px;
+  for (const b of out) { b.open *= k; b.high *= k; b.low *= k; b.close *= k; b.volume = Math.round(b.volume * (40 / Math.max(base, 5))); }
+  return out;
+}
+
+async function twelveHistory(ticker) {
+  if (!settings.tdKey) throw new Error('Falta la clave API de Twelve Data (⚙ Configuración).');
+  const url = `https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(ticker)}&interval=1day&outputsize=5000&order=ASC&apikey=${encodeURIComponent(settings.tdKey)}`;
+  const res = await fetch(url);
+  const j = await res.json();
+  if (j.status === 'error' || !Array.isArray(j.values)) throw new Error(j.message || `Twelve Data: sin datos para ${ticker}`);
+  return j.values.map(v => ({ time: v.datetime.slice(0, 10), open: +v.open, high: +v.high, low: +v.low, close: +v.close, volume: +v.volume || 0 }))
+    .filter(b => isFinite(b.close));
+}
+
+function getFeed(ticker) {
+  let f = feeds.get(ticker);
+  if (!f) {
+    f = { daily: null, subs: new Set(), promise: null };
+    f.promise = (settings.hist === 'twelve' ? twelveHistory(ticker) : Promise.resolve(demoHistory(ticker)))
+      .then(d => { if (!d.length) throw new Error('Sin datos'); f.daily = d; return f; });
+    f.promise.catch(() => feeds.delete(ticker));
+    feeds.set(ticker, f);
+  }
+  return f;
+}
+
+// Aplica un precio en tiempo real a la barra diaria de la fecha dada (NY).
+function applyTick(ticker, price, size, date, ohlc) {
+  const f = feeds.get(ticker);
+  if (!f || !f.daily || !isFinite(price)) return;
+  const d = f.daily, last = d[d.length - 1];
+  if (date < last.time) return;
+  if (date > last.time) d.push({ time: date, open: ohlc?.open ?? price, high: ohlc?.high ?? price, low: ohlc?.low ?? price, close: price, volume: ohlc?.volume ?? size ?? 0 });
+  else if (ohlc) Object.assign(last, { open: ohlc.open, high: Math.max(ohlc.high, price), low: Math.min(ohlc.low, price), close: price, volume: ohlc.volume ?? last.volume });
+  else { last.close = price; last.high = Math.max(last.high, price); last.low = Math.min(last.low, price); last.volume += size || 0; }
+  f.subs.forEach(p => p.onTick());
+}
+
+/* ---------- Agregación y medias ---------- */
+const weekKey = s => { const d = new Date(s + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() - (d.getUTCDay() + 6) % 7); return isoUTC(d); };
+const monthKey = s => s.slice(0, 7) + '-01';
+function aggregate(daily, tf) {
+  if (tf === 'D') return daily.map(b => ({ ...b, last: b.time }));
+  const key = tf === 'W' ? weekKey : monthKey, out = [];
+  for (const b of daily) {
+    const k = key(b.time), o = out[out.length - 1];
+    if (o && o.time === k) { o.high = Math.max(o.high, b.high); o.low = Math.min(o.low, b.low); o.close = b.close; o.volume += b.volume; o.last = b.time; }
+    else out.push({ time: k, open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume, last: b.time });
+  }
+  return out;
+}
+function movingAvg(values, n, kind) {
+  const out = new Array(values.length).fill(null);
+  if (kind === 'EMA') {
+    const k = 2 / (n + 1); let e = null, s = 0;
+    for (let i = 0; i < values.length; i++) {
+      if (i < n) { s += values[i]; if (i === n - 1) out[i] = e = s / n; }
+      else out[i] = e = values[i] * k + e * (1 - k);
+    }
+  } else {
+    let s = 0;
+    for (let i = 0; i < values.length; i++) { s += values[i]; if (i >= n) s -= values[i - n]; if (i >= n - 1) out[i] = s / n; }
+  }
+  return out;
+}
+// Media de N semanas expresada en la temporalidad del gráfico.
+function maForTf(daily, bars, tf, weeks, kind) {
+  if (tf === 'D') {
+    const v = movingAvg(daily.map(b => b.close), weeks * 5, kind);
+    return bars.map((b, i) => v[i] == null ? { time: b.time } : { time: b.time, value: v[i] });
+  }
+  const weekly = tf === 'W' ? bars : aggregate(daily, 'W');
+  const v = movingAvg(weekly.map(b => b.close), weeks, kind);
+  if (tf === 'W') return bars.map((b, i) => v[i] == null ? { time: b.time } : { time: b.time, value: v[i] });
+  const byMonth = new Map();
+  weekly.forEach((w, i) => { if (v[i] != null) byMonth.set(monthKey(w.last), v[i]); });
+  return bars.map(b => byMonth.has(b.time) ? { time: b.time, value: byMonth.get(b.time) } : { time: b.time });
+}
+
+/* ================= Tiempo real ================= */
+const rt = { ws: null, wsSubs: new Set(), pollTimer: null, demoTimer: null, status: 'off' };
+
+function wantedTickers() { return [...new Set(panels.filter(p => p.visible).map(p => p.cfg.ticker))]; }
+
+function rtSync() {
+  const want = new Set(wantedTickers());
+  if (settings.rt === 'finnhub' && settings.fhKey) {
+    if (!rt.ws || rt.ws.readyState > 1) openFinnhub();
+    else if (rt.ws.readyState === 1) {
+      for (const t of rt.wsSubs) if (!want.has(t)) { rt.ws.send(JSON.stringify({ type: 'unsubscribe', symbol: t })); rt.wsSubs.delete(t); }
+      for (const t of want) if (!rt.wsSubs.has(t)) { rt.ws.send(JSON.stringify({ type: 'subscribe', symbol: t })); rt.wsSubs.add(t); }
+    }
+  }
+}
+function openFinnhub() {
+  try { rt.ws?.close(); } catch {}
+  rt.wsSubs.clear();
+  const ws = new WebSocket('wss://ws.finnhub.io?token=' + encodeURIComponent(settings.fhKey));
+  rt.ws = ws; setRtStatus('connecting');
+  ws.onopen = () => { setRtStatus('live'); rtSync(); };
+  ws.onmessage = ev => {
+    let m; try { m = JSON.parse(ev.data); } catch { return; }
+    if (m.type !== 'trade' || !Array.isArray(m.data)) return;
+    const agg = new Map(); // agrupa ráfagas por símbolo
+    for (const tr of m.data) { const a = agg.get(tr.s) || { p: tr.p, v: 0, t: tr.t }; a.p = tr.p; a.v += tr.v || 0; a.t = tr.t; agg.set(tr.s, a); }
+    agg.forEach((a, s) => applyTick(s, a.p, a.v, nyDate(a.t)));
+  };
+  ws.onclose = () => { if (rt.ws === ws && settings.rt === 'finnhub') { setRtStatus('reconnecting'); setTimeout(() => rt.ws === ws && openFinnhub(), 5000); } };
+  ws.onerror = () => setRtStatus('error');
+}
+async function pollTwelve() {
+  const syms = wantedTickers(); if (!syms.length || !settings.tdKey) return;
+  try {
+    const res = await fetch(`https://api.twelvedata.com/quote?symbol=${encodeURIComponent(syms.join(','))}&apikey=${encodeURIComponent(settings.tdKey)}`);
+    const j = await res.json();
+    const list = syms.length === 1 ? { [syms[0]]: j } : j;
+    for (const s of syms) {
+      const q = list[s]; if (!q || q.status === 'error' || !q.close) continue;
+      applyTick(s, +q.close, 0, (q.datetime || nyDate()).slice(0, 10), { open: +q.open, high: +q.high, low: +q.low, volume: +q.volume || 0 });
+    }
+    setRtStatus('live');
+  } catch { setRtStatus('error'); }
+}
+function demoTick() {
+  for (const t of wantedTickers()) {
+    const f = feeds.get(t); if (!f?.daily) continue;
+    const last = f.daily[f.daily.length - 1], r = Math.random();
+    const px = last.close * (1 + (r - 0.5) * 0.0024 + (Math.random() < 0.03 ? (Math.random() - 0.5) * 0.01 : 0));
+    applyTick(t, px, Math.round(200 + Math.random() * 4000), last.time);
+  }
+}
+function startRealtime() {
+  clearInterval(rt.pollTimer); clearInterval(rt.demoTimer);
+  if (rt.ws) { const w = rt.ws; rt.ws = null; try { w.close(); } catch {} }
+  if (settings.rt === 'demo') { rt.demoTimer = setInterval(demoTick, 1000); setRtStatus('sim'); }
+  else if (settings.rt === 'finnhub') { if (!settings.fhKey) { setRtStatus('nokey'); return; } openFinnhub(); }
+  else if (settings.rt === 'twelve') { if (!settings.tdKey) { setRtStatus('nokey'); return; } pollTwelve(); rt.pollTimer = setInterval(pollTwelve, settings.poll * 1000); }
+  else setRtStatus('off');
+}
+function setRtStatus(s) {
+  rt.status = s;
+  const src = { demo: 'Demo (simulado)', twelve: 'Twelve Data' }[settings.hist];
+  const live = { sim: 'ticks simulados', live: settings.rt === 'finnhub' ? 'Finnhub en vivo' : `Twelve Data cada ${settings.poll}s`,
+    connecting: 'conectando…', reconnecting: 'reconectando…', error: 'error de conexión', nokey: 'falta clave API', off: 'desactivado' }[s];
+  $('#srcTxt').textContent = `Histórico: ${src} · Tiempo real: ${live}`;
+  panels.forEach(p => p.setLive(s === 'sim' || s === 'live'));
+}
+
+/* ================= Horario de mercado ================= */
+function updateMarket() {
+  const parts = Object.fromEntries(nyPartsFmt.formatToParts(new Date()).map(p => [p.type, p.value]));
+  const mins = (+parts.hour % 24) * 60 + +parts.minute, wk = !['Sat', 'Sun'].includes(parts.weekday);
+  let cls = 'closed', txt = 'Mercado cerrado';
+  if (wk && mins >= 570 && mins < 960) { cls = 'open'; txt = 'Mercado abierto'; }
+  else if (wk && mins >= 240 && mins < 570) { cls = 'pre'; txt = 'Pre-apertura'; }
+  else if (wk && mins >= 960 && mins < 1200) { cls = 'pre'; txt = 'Post-cierre'; }
+  $('#marketDot').className = 'dot ' + cls;
+  $('#marketTxt').textContent = `${txt} · NY ${String(parts.hour % 24).padStart(2, '0')}:${parts.minute}`;
+}
+
+/* ================= Tema del gráfico ================= */
+function chartTheme() {
+  const dark = state.theme !== 'light';
+  return {
+    layout: { background: { type: LWC.ColorType.Solid, color: cssVar('--panel') }, textColor: cssVar('--muted'), fontFamily: 'Inter, system-ui, sans-serif', fontSize: 11 },
+    grid: { vertLines: { color: dark ? 'rgba(42,52,72,.45)' : 'rgba(210,217,228,.7)' }, horzLines: { color: dark ? 'rgba(42,52,72,.45)' : 'rgba(210,217,228,.7)' } },
+    rightPriceScale: { borderColor: cssVar('--line') },
+    timeScale: { borderColor: cssVar('--line') },
+    crosshair: {
+      vertLine: { color: dark ? '#6b7a94' : '#94a3b8', labelBackgroundColor: dark ? '#2d384d' : '#475569' },
+      horzLine: { color: dark ? '#6b7a94' : '#94a3b8', labelBackgroundColor: dark ? '#2d384d' : '#475569' }
+    }
+  };
+}
+const colors = () => ({ up: cssVar('--up'), down: cssVar('--down'), accent: cssVar('--accent'), ma: { 10: cssVar('--ma10'), 20: cssVar('--ma20'), 50: cssVar('--ma50') } });
+
+/* ================= Panel de gráfico ================= */
+let activePanel = null;
+const sync = { src: null, until: 0 };
+const syncLocked = p => sync.src && sync.src !== p && performance.now() < sync.until;
+const lockSync = p => { sync.src = p; sync.until = performance.now() + 180; };
+
+const ICONS = {
+  line: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17l5-6 4 3 8-9"/></svg>',
+  candles: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M7 3v4M7 17v4M17 3v6M17 17v4"/><rect x="4.5" y="7" width="5" height="10" rx="1" fill="currentColor"/><rect x="14.5" y="9" width="5" height="8" rx="1"/></svg>',
+  bars: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M7 4v16M4 8h3M7 15h3M17 4v16M14 11h3M17 7h3"/></svg>',
+  max: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>'
+};
+
+class Panel {
+  constructor(i, cfg) {
+    this.i = i; this.cfg = cfg; this.visible = false; this.bars = []; this.feed = null;
+    this.main = null; this.maS = {}; this.lastPointer = 'mouse'; this.pinned = null; this.loadSeq = 0;
+    this.el = document.createElement('section');
+    this.el.className = 'panel';
+    this.el.innerHTML = `
+      <div class="phead">
+        <div class="prow">
+          <span class="pidx" title="Tecla ${i + 1}">${i + 1}</span>
+          <input class="ticker" list="tickers" maxlength="10" aria-label="Símbolo del gráfico ${i + 1}" spellcheck="false" autocomplete="off">
+          <span class="pname"></span>
+          <span class="quote"><span class="dot" title="Tiempo real"></span><span class="qprice">—</span><span class="qchg"></span></span>
+          <button class="icon-btn maxbtn" title="Maximizar (F)" aria-label="Maximizar">${ICONS.max}</button>
+        </div>
+        <div class="tools">
+          <div class="seg typeSeg" role="group" aria-label="Tipo de gráfico">
+            ${Object.entries(TYPES).map(([k, v]) => `<button data-type="${k}" title="${v}" aria-label="${v}">${ICONS[k]}</button>`).join('')}
+          </div>
+          <div class="seg tfSeg" role="group" aria-label="Temporalidad">
+            ${Object.entries(TFS).map(([k, v]) => `<button data-tf="${k}" title="${v}">${{ D: 'D', W: 'S', M: 'M' }[k]}</button>`).join('')}
+          </div>
+          <span class="sep"></span>
+          ${MA_WEEKS.map(w => `<button class="ma-chip" data-ma="${w}" style="--c:var(--ma${w})" title="Media móvil de ${w} semanas"><i></i>${w}s</button>`).join('')}
+          <button class="ma-chip kindbtn" style="--c:var(--text)" aria-pressed="true" title="Tipo de media: simple (SMA) o exponencial (EMA)">SMA</button>
+          <button class="ma-chip volbtn" style="--c:var(--muted)" title="Volumen"><i></i>Vol</button>
+        </div>
+      </div>
+      <div class="cwrap">
+        <div class="chart"></div>
+        <div class="legend"><div class="l1"></div><div class="lma"></div></div>
+        <div class="overlay"></div>
+      </div>`;
+    this.q = s => this.el.querySelector(s);
+    this.chartEl = this.q('.chart'); this.legendL1 = this.q('.l1'); this.legendMA = this.q('.lma'); this.overlay = this.q('.overlay');
+    this.initChart(); this.bindUI(); this.syncUI();
+  }
+
+  initChart() {
+    const c = colors();
+    this.chart = LWC.createChart(this.chartEl, Object.assign(chartTheme(), {
+      autoSize: true,
+      localization: { locale: 'es-ES', priceFormatter: p => fmtP(p) },
+      rightPriceScale: Object.assign(chartTheme().rightPriceScale, { scaleMargins: { top: 0.14, bottom: 0.08 } }),
+      timeScale: Object.assign(chartTheme().timeScale, { rightOffset: 5, barSpacing: 7, minBarSpacing: 0.4, shiftVisibleRangeOnNewBar: true }),
+      crosshair: Object.assign(chartTheme().crosshair, { mode: LWC.CrosshairMode.Normal }),
+      // Rueda = zoom · arrastrar = desplazar · pellizcar = zoom · deslizar = desplazar (el scroll vertical queda para la página)
+      handleScale: { mouseWheel: true, pinch: true, axisPressedMouseMove: true, axisDoubleClickReset: true },
+      handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: false },
+      kineticScroll: { touch: true, mouse: false },
+      trackingMode: { exitMode: LWC.TrackingModeExitMode.OnNextTap }
+    }));
+    this.vol = this.chart.addSeries(LWC.HistogramSeries, { priceScaleId: 'vol', priceFormat: { type: 'volume' }, lastValueVisible: false, priceLineVisible: false });
+    this.chart.priceScale('vol').applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
+    this.createMain();
+
+    // Mayús + rueda: desplazamiento temporal (se intercepta antes de que el gráfico lo convierta en zoom).
+    this.chartEl.addEventListener('wheel', e => {
+      if (!e.shiftKey) return;
+      e.preventDefault(); e.stopPropagation();
+      const d = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+      const r = this.chart.timeScale().getVisibleLogicalRange(); if (!r) return;
+      const k = Math.sign(d) * Math.max(1, Math.round((r.to - r.from) * Math.min(Math.abs(d), 300) / 1500));
+      this.chart.timeScale().setVisibleLogicalRange({ from: r.from + k, to: r.to + k });
+    }, { capture: true, passive: false });
+
+    this.chartEl.addEventListener('pointerdown', e => { this.lastPointer = e.pointerType; setActive(this); }, { capture: true });
+    this.chartEl.addEventListener('pointerenter', e => { if (e.pointerType === 'mouse') setActive(this, true); });
+
+    this.chart.subscribeCrosshairMove(p => this.onCrosshair(p));
+    // Tocar una barra en el celular fija la cruz sobre ella y muestra sus datos.
+    this.chart.subscribeClick(p => {
+      if (this.lastPointer === 'mouse' || p.time == null) return;
+      const bar = p.seriesData.get(this.main);
+      if (!bar) return;
+      this.pinned = p.time;
+      this.chart.setCrosshairPosition(bar.close ?? bar.value, p.time, this.main);
+      this.renderLegend(this.barAt(p.time));
+    });
+    this.chart.timeScale().subscribeVisibleTimeRangeChange(r => {
+      if (!state.sync || !r || syncLocked(this) || !this.visible) return;
+      lockSync(this);
+      panels.forEach(o => { if (o !== this && o.visible && o.bars.length) { try { o.chart.timeScale().setVisibleRange(r); } catch {} } });
+    });
+  }
+
+  createMain() {
+    const c = colors();
+    if (this.main) this.chart.removeSeries(this.main);
+    Object.values(this.maS).forEach(s => this.chart.removeSeries(s)); this.maS = {};
+    const common = { priceLineVisible: true, lastValueVisible: true, priceLineStyle: LWC.LineStyle.Dotted };
+    if (this.cfg.type === 'line') this.main = this.chart.addSeries(LWC.LineSeries, { ...common, color: c.accent, lineWidth: 2, crosshairMarkerRadius: 4 });
+    else if (this.cfg.type === 'bars') this.main = this.chart.addSeries(LWC.BarSeries, { ...common, upColor: c.up, downColor: c.down, thinBars: false, openVisible: true });
+    else this.main = this.chart.addSeries(LWC.CandlestickSeries, { ...common, upColor: c.up, downColor: c.down, borderUpColor: c.up, borderDownColor: c.down, wickUpColor: c.up, wickDownColor: c.down });
+    for (const w of MA_WEEKS) if (this.cfg.ma[w]) this.addMA(w);
+  }
+  addMA(w) {
+    this.maS[w] = this.chart.addSeries(LWC.LineSeries, {
+      color: colors().ma[w], lineWidth: w === 50 ? 2 : 1.5, priceLineVisible: false, lastValueVisible: true,
+      crosshairMarkerVisible: false, title: '', priceFormat: { type: 'price', precision: 2, minMove: 0.01 }
+    });
+  }
+
+  bindUI() {
+    const inp = this.q('.ticker');
+    const commit = () => {
+      const t = inp.value.trim().toUpperCase().replace(/[^A-Z0-9.\-]/g, '');
+      if (!t) { inp.value = this.cfg.ticker; return; }
+      if (t !== this.cfg.ticker) { this.cfg.ticker = t; persist(); this.load(); }
+      inp.value = t;
+    };
+    inp.addEventListener('keydown', e => { if (e.key === 'Enter') { commit(); inp.blur(); } if (e.key === 'Escape') { inp.value = this.cfg.ticker; inp.blur(); } });
+    inp.addEventListener('change', commit);
+    inp.addEventListener('focus', () => { setActive(this); inp.select(); });
+    this.q('.typeSeg').addEventListener('click', e => { const b = e.target.closest('button'); if (b) this.setType(b.dataset.type); });
+    this.q('.tfSeg').addEventListener('click', e => { const b = e.target.closest('button'); if (b) this.setTf(b.dataset.tf); });
+    this.q('.kindbtn').addEventListener('click', () => { this.cfg.maKind = this.cfg.maKind === 'EMA' ? 'SMA' : 'EMA'; persist(); this.syncUI(); this.render(false); });
+    this.el.querySelectorAll('[data-ma]').forEach(b => b.addEventListener('click', () => this.toggleMA(+b.dataset.ma)));
+    this.q('.volbtn').addEventListener('click', () => { this.cfg.vol = !this.cfg.vol; persist(); this.syncUI(); this.render(false); });
+    this.q('.maxbtn').addEventListener('click', () => toggleMax(this));
+    this.el.addEventListener('pointerdown', () => setActive(this));
+  }
+  syncUI() {
+    this.q('.ticker').value = this.cfg.ticker;
+    this.q('.pname').textContent = nameOf(this.cfg.ticker);
+    this.el.querySelectorAll('[data-type]').forEach(b => b.setAttribute('aria-pressed', b.dataset.type === this.cfg.type));
+    this.el.querySelectorAll('[data-tf]').forEach(b => b.setAttribute('aria-pressed', b.dataset.tf === this.cfg.tf));
+    this.q('.kindbtn').textContent = this.cfg.maKind;
+    this.el.querySelectorAll('[data-ma]').forEach(b => b.setAttribute('aria-pressed', !!this.cfg.ma[b.dataset.ma]));
+    this.q('.volbtn').setAttribute('aria-pressed', this.cfg.vol);
+  }
+
+  setType(t) { if (!TYPES[t] || t === this.cfg.type) return; this.cfg.type = t; persist(); this.syncUI(); this.createMain(); this.render(false); }
+  setTf(tf) {
+    if (!TFS[tf] || tf === this.cfg.tf) return;
+    this.cfg.tf = tf; persist(); this.syncUI(); this.render(true);
+  }
+  toggleMA(w) {
+    this.cfg.ma[w] = !this.cfg.ma[w]; persist(); this.syncUI();
+    if (this.cfg.ma[w]) { this.addMA(w); this.render(false); } else { this.chart.removeSeries(this.maS[w]); delete this.maS[w]; this.renderLegend(); }
+  }
+
+  show(v) {
+    this.visible = v; this.el.classList.toggle('hidden', !v);
+    if (v && !this.feed && !this.loading) this.load();
+  }
+
+  async load() {
+    const seq = ++this.loadSeq, t = this.cfg.ticker;
+    if (this.feed) { this.feed.subs.delete(this); this.feed = null; }
+    this.syncUI(); this.bars = []; this.loading = true;
+    this.overlay.innerHTML = `<div><div class="spinner"></div>Cargando ${t}…</div>`; this.overlay.classList.add('show');
+    try {
+      const f = await getFeed(t).promise;
+      if (seq !== this.loadSeq) return;
+      this.feed = f; f.subs.add(this);
+      this.overlay.classList.remove('show');
+      this.render(true);
+    } catch (err) {
+      if (seq !== this.loadSeq) return;
+      this.main.setData([]); this.vol.setData([]); Object.values(this.maS).forEach(s => s.setData([]));
+      this.q('.qprice').textContent = '—'; this.q('.qchg').textContent = ''; this.legendL1.innerHTML = ''; this.legendMA.innerHTML = '';
+      this.overlay.innerHTML = `<div class="err">No se pudieron cargar datos de <b>${t}</b>.<br>${String(err.message || err).replace(/</g, '&lt;')}</div>`;
+    } finally { if (seq === this.loadSeq) { this.loading = false; rtSync(); } }
+  }
+
+  // Construye todas las series desde el diario compartido.
+  render(fit) {
+    if (!this.feed?.daily) return;
+    const c = colors(), daily = this.feed.daily, tf = this.cfg.tf;
+    this.bars = aggregate(daily, tf);
+    const mainData = this.cfg.type === 'line'
+      ? this.bars.map(b => ({ time: b.time, value: b.close }))
+      : this.bars.map(b => ({ time: b.time, open: b.open, high: b.high, low: b.low, close: b.close }));
+    this.main.setData(mainData);
+    this.vol.setData(this.cfg.vol ? this.bars.map(b => ({ time: b.time, value: b.volume, color: (b.close >= b.open ? c.up : c.down) + '55' })) : []);
+    this.maData = {};
+    for (const w of MA_WEEKS) if (this.maS[w]) { this.maData[w] = maForTf(daily, this.bars, tf, w, this.cfg.maKind); this.maS[w].setData(this.maData[w]); }
+    if (fit) {
+      const n = this.bars.length, show = { D: 180, W: 156, M: 120 }[tf];
+      this.chart.timeScale().setVisibleLogicalRange({ from: Math.max(0, n - show), to: n + 4 });
+    }
+    this.renderQuote(); this.renderLegend();
+  }
+
+  // Actualiza solo la última barra (camino rápido para ticks en tiempo real).
+  onTick() {
+    if (!this.visible || !this.feed?.daily) return;
+    const c = colors(), daily = this.feed.daily, tf = this.cfg.tf;
+    const prevLen = this.bars.length;
+    this.bars = aggregate(daily, tf);
+    const b = this.bars[this.bars.length - 1];
+    if (this.bars.length !== prevLen && this.bars.length !== prevLen + 1) return this.render(false);
+    this.main.update(this.cfg.type === 'line' ? { time: b.time, value: b.close } : { time: b.time, open: b.open, high: b.high, low: b.low, close: b.close });
+    if (this.cfg.vol) this.vol.update({ time: b.time, value: b.volume, color: (b.close >= b.open ? c.up : c.down) + '55' });
+    for (const w of MA_WEEKS) if (this.maS[w]) {
+      const d = maForTf(daily, this.bars, tf, w, this.cfg.maKind); this.maData[w] = d;
+      this.maS[w].update(d[d.length - 1]);
+    }
+    this.renderQuote(true);
+    if (this.pinned == null && !this.hovering) this.renderLegend();
+  }
+
+  renderQuote(flash) {
+    const d = this.feed.daily, last = d[d.length - 1], prev = d[d.length - 2] || last;
+    const qp = this.q('.qprice'), chg = last.close - prev.close, pct = chg / prev.close * 100;
+    const before = this.lastPrice; this.lastPrice = last.close;
+    qp.textContent = fmtP(last.close);
+    qp.className = 'qprice ' + (chg >= 0 ? 'up' : 'down');
+    if (flash && before != null && before !== last.close) {
+      qp.classList.add(last.close > before ? 'flash-up' : 'flash-down');
+      requestAnimationFrame(() => requestAnimationFrame(() => qp.classList.remove('flash-up', 'flash-down')));
+    }
+    const qc = this.q('.qchg'); qc.textContent = `${chg >= 0 ? '+' : ''}${fmtP(chg)} (${fmtPct(pct)})`; qc.className = 'qchg ' + (chg >= 0 ? 'up' : 'down');
+  }
+  setLive(on) { this.q('.quote .dot').className = 'dot' + (on ? ' live' : ''); }
+
+  barAt(time) { const i = this.indexOf(time); return i < 0 ? null : i; }
+  indexOf(time) {
+    let lo = 0, hi = this.bars.length - 1;
+    while (lo <= hi) { const m = (lo + hi) >> 1, t = this.bars[m].time; if (t === time) return m; if (t < time) lo = m + 1; else hi = m - 1; }
+    return -1;
+  }
+  renderLegend(i = this.bars.length - 1) {
+    const b = this.bars[i]; if (!b) { this.legendL1.innerHTML = ''; this.legendMA.innerHTML = ''; return; }
+    const p = this.bars[i - 1], chg = p ? (b.close / p.close - 1) * 100 : 0, cls = chg >= 0 ? 'up' : 'down';
+    this.legendL1.innerHTML =
+      `<span class="ld">${this.cfg.ticker} · ${fmtDate(b.time, this.cfg.tf)}${this.cfg.tf === 'W' ? ' (sem.)' : ''}</span>` +
+      (this.cfg.type === 'line' ? '' : `<span>A <b>${fmtP(b.open)}</b></span><span>M <b>${fmtP(b.high)}</b></span><span>m <b>${fmtP(b.low)}</b></span>`) +
+      `<span>C <b class="${cls}">${fmtP(b.close)}</b></span><span class="${cls}">${fmtPct(chg)}</span>` +
+      (this.cfg.vol ? `<span>Vol <b>${fmtV(b.volume)}</b></span>` : '');
+    this.legendMA.innerHTML = MA_WEEKS.filter(w => this.maS[w]).map(w => {
+      const v = this.maData?.[w]?.[i]?.value;
+      return `<span style="color:var(--ma${w})">${this.cfg.maKind} ${w}s <b style="color:inherit">${fmtP(v)}</b></span>`;
+    }).join('');
+  }
+
+  onCrosshair(p) {
+    const userMove = !!p.sourceEvent;
+    if (p.time == null || !p.point) {
+      this.hovering = false;
+      if (userMove || this.pinned == null) { this.pinned = null; this.renderLegend(); }
+      if (userMove && state.sync) panels.forEach(o => o !== this && o.visible && o.chart.clearCrosshairPosition());
+      return;
+    }
+    if (!userMove && this.pinned == null && sync.cross !== this) return;
+    if (userMove) { this.hovering = true; if (this.lastPointer === 'mouse') this.pinned = null; }
+    const i = this.indexOf(p.time); if (i >= 0) this.renderLegend(i);
+    if (userMove && state.sync) {
+      panels.forEach(o => {
+        if (o === this || !o.visible || !o.bars.length) return;
+        const j = o.cfg.tf === this.cfg.tf ? o.indexOf(p.time) : -1;
+        if (j < 0) { o.chart.clearCrosshairPosition(); o.renderLegend(); return; }
+        sync.cross = o; o.chart.setCrosshairPosition(o.bars[j].close, p.time, o.main); o.renderLegend(j); sync.cross = null;
+      });
+    }
+  }
+
+  applyTheme() {
+    const c = colors();
+    this.chart.applyOptions(chartTheme());
+    if (this.cfg.type === 'line') this.main.applyOptions({ color: c.accent });
+    else this.main.applyOptions({ upColor: c.up, downColor: c.down, ...(this.cfg.type === 'candles' ? { borderUpColor: c.up, borderDownColor: c.down, wickUpColor: c.up, wickDownColor: c.down } : {}) });
+    for (const w in this.maS) this.maS[w].applyOptions({ color: c.ma[w] });
+    this.render(false);
+  }
+
+  /* --- Navegación por teclado --- */
+  scrollBars(k) { const ts = this.chart.timeScale(), r = ts.getVisibleLogicalRange(); if (r) ts.setVisibleLogicalRange({ from: r.from + k, to: r.to + k }); }
+  zoom(f) {
+    const ts = this.chart.timeScale(), r = ts.getVisibleLogicalRange(); if (!r) return;
+    const w = r.to - r.from, nw = Math.min(Math.max(w * f, 8), this.bars.length + 60);
+    ts.setVisibleLogicalRange({ from: r.to - nw, to: r.to });
+  }
+  toStart() { const ts = this.chart.timeScale(), r = ts.getVisibleLogicalRange(); if (r) ts.setVisibleLogicalRange({ from: -3, to: r.to - r.from - 3 }); }
+  toEnd() { this.chart.timeScale().scrollToRealTime(); }
+}
+
+/* ================= Gestión de paneles ================= */
+const grid = $('#grid');
+const panels = state.panels.map((cfg, i) => { const p = new Panel(i, cfg); grid.appendChild(p.el); return p; });
+
+function setActive(p, fromHover) {
+  if (activePanel === p) return;
+  if (fromHover && document.activeElement?.classList.contains('ticker')) return;
+  activePanel?.el.classList.remove('active');
+  activePanel = p; p?.el.classList.add('active');
+}
+function applyLayout(n) {
+  state.n = n; persist();
+  grid.dataset.n = n;
+  if (grid.classList.contains('has-max')) exitMax();
+  panels.forEach((p, i) => p.show(i < n));
+  $('#layoutSeg').querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', +b.dataset.n === n));
+  if (!activePanel || !activePanel.visible) setActive(panels[0]);
+  rtSync();
+}
+function toggleMax(p) {
+  const on = !p.el.classList.contains('maxed');
+  panels.forEach(o => o.el.classList.remove('maxed'));
+  grid.classList.toggle('has-max', on);
+  if (on) { p.el.classList.add('maxed'); setActive(p); }
+  p.q('.maxbtn').title = on ? 'Restaurar (F / Esc)' : 'Maximizar (F)';
+}
+function exitMax() { grid.classList.remove('has-max'); panels.forEach(o => o.el.classList.remove('maxed')); }
+
+/* ================= Controles globales ================= */
+$('#layoutSeg').addEventListener('click', e => { const b = e.target.closest('button'); if (b) applyLayout(+b.dataset.n); });
+const syncBtn = $('#syncBtn');
+syncBtn.setAttribute('aria-pressed', state.sync);
+syncBtn.addEventListener('click', () => {
+  state.sync = !state.sync; persist(); syncBtn.setAttribute('aria-pressed', state.sync);
+  toast(state.sync ? 'Sincronización activada: el tiempo y la cruz se mueven juntos' : 'Sincronización desactivada');
+  if (state.sync && activePanel) { const r = activePanel.chart.timeScale().getVisibleRange(); if (r) { sync.src = null; panels.forEach(o => o !== activePanel && o.visible && o.bars.length && o.chart.timeScale().setVisibleRange(r)); } }
+});
+$('#themeBtn').addEventListener('click', () => {
+  state.theme = state.theme === 'light' ? 'dark' : 'light'; persist();
+  document.documentElement.dataset.theme = state.theme;
+  panels.forEach(p => p.applyTheme());
+});
+$('#helpBtn').addEventListener('click', () => $('#helpDlg').showModal());
+const sDlg = $('#settingsDlg');
+$('#settingsBtn').addEventListener('click', () => {
+  $('#histSel').value = settings.hist; $('#rtSel').value = settings.rt; $('#tdKey').value = settings.tdKey; $('#fhKey').value = settings.fhKey; $('#pollSel').value = String(settings.poll);
+  sDlg.returnValue = ''; sDlg.showModal();
+});
+sDlg.addEventListener('close', () => {
+  if (sDlg.returnValue !== 'save') return;
+  const histChanged = $('#histSel').value !== settings.hist || $('#tdKey').value.trim() !== settings.tdKey;
+  Object.assign(settings, { hist: $('#histSel').value, rt: $('#rtSel').value, tdKey: $('#tdKey').value.trim(), fhKey: $('#fhKey').value.trim(), poll: +$('#pollSel').value });
+  lsSet('mnyse.settings', settings);
+  if (histChanged) { feeds.clear(); panels.forEach(p => { p.feed = null; if (p.visible) p.load(); }); }
+  startRealtime();
+  toast('Configuración guardada');
+});
+$('#tickers').innerHTML = Object.entries(SYMBOLS).map(([k, v]) => `<option value="${k.replace('_', '.')}">${v[0]}</option>`).join('');
+
+/* ================= Atajos de teclado ================= */
+document.addEventListener('keydown', e => {
+  if (e.target.closest?.('input,select,textarea,dialog') || e.ctrlKey || e.metaKey || e.altKey) return;
+  const p = activePanel; let handled = true;
+  switch (e.key) {
+    case 'ArrowLeft': p?.scrollBars(e.shiftKey ? -10 : -1); break;
+    case 'ArrowRight': p?.scrollBars(e.shiftKey ? 10 : 1); break;
+    case '+': case '=': p?.zoom(0.8); break;
+    case '-': case '_': case '−': p?.zoom(1.25); break;
+    case 'Home': p?.toStart(); break;
+    case 'End': p?.toEnd(); break;
+    case 'Escape': exitMax(); break;
+    case '?': $('#helpDlg').showModal(); break;
+    default:
+      if (/^[1-6]$/.test(e.key)) { const q = panels[+e.key - 1]; if (q.visible) setActive(q); else handled = false; break; }
+      const k = e.key.toLowerCase();
+      if (!p) { handled = false; break; }
+      if (k === 'l') p.setType('line'); else if (k === 'v') p.setType('candles'); else if (k === 'b') p.setType('bars');
+      else if (k === 'd') p.setTf('D'); else if (k === 's') p.setTf('W'); else if (k === 'm') p.setTf('M');
+      else if (k === 'f') toggleMax(p);
+      else handled = false;
+  }
+  if (handled) e.preventDefault();
+});
+
+/* ================= Arranque ================= */
+applyLayout(state.n);
+startRealtime();
+updateMarket(); setInterval(updateMarket, 15000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden && settings.rt === 'twelve') pollTwelve(); });
+})();
+</script>
+</body>
+</html>
